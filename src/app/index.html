@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SONGCODE by JMSCNC</title>
+<meta name="description" content="Turn Guitar Pro tabs and MIDI files into g-code that makes your CNC's stepper motors play the song.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>SONGCODE <small>by JMSCNC</small></h1>
+  <p>Guitar Pro tabs and MIDI files in, g-code out. Your CNC's stepper motors play the song.</p>
+</header>
+<main>
+  <section id="open">
+    <h2><b>1</b> OPEN A SONG</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".gp3,.gp4,.gp5,.gpx,.gp,.mid,.midi">
+      <span>Drop a <b>.gp3 .gp4 .gp5 .gpx .gp</b> tab or a <b>.mid</b> file here, or tap to pick one</span>
+    </label>
+    <div class="row">
+      <label class="book">Or pick a free song from the SONGCODE book (public domain, arranged by JMSCNC):
+        <select id="book"><option value="">Choose a song...</option></select></label>
+    </div>
+    <div id="songinfo" class="info"></div>
+  </section>
+
+  <section id="tracks" hidden>
+    <h2><b>2</b> PICK THE PARTS</h2>
+    <p class="hint">Melody plays on the first motor. Fill plays in the melody's rests (a riff or lead guitar). Bass plays on the second motor. Each motor plays one note at a time: chords keep their top note (melody) or bottom note (bass).</p>
+    <div class="tablewrap"><table id="tracktable"></table></div>
+  </section>
+
+  <section id="section" hidden>
+    <h2><b>3</b> SECTION AND SOUND</h2>
+    <div class="grid">
+      <label>From (s) <input type="number" id="from" min="0" step="0.5" value="0"></label>
+      <label>To (s) <input type="number" id="to" min="0" step="0.5" value="60"></label>
+      <label>Repeat <input type="number" id="repeat" min="1" max="16" step="1" value="1"></label>
+      <label>Speed % <input type="number" id="tempo" min="25" max="400" step="5" value="100"></label>
+      <label>Transpose (semitones) <input type="number" id="transpose" min="-24" max="24" step="1" value="0"></label>
+      <label>Fill gap (s) <input type="number" id="gap" min="0.1" max="5" step="0.1" value="0.6"></label>
+    </div>
+    <p class="hint" id="songlen"></p>
+  </section>
+
+  <section id="machine">
+    <h2><b>4</b> YOUR MACHINE</h2>
+    <div class="grid">
+      <label class="wide">Preset <select id="preset"></select></label>
+      <label>Flavor <select id="flavor"><option value="grbl">grbl / grblHAL</option><option value="linuxcnc">LinuxCNC</option><option value="marlin">Marlin</option></select></label>
+      <label>Units <select id="units"><option value="mm">mm</option><option value="in">inch</option></select></label>
+    </div>
+    <p class="hint" id="presetnote"></p>
+    <table class="axes">
+      <thead><tr><th></th><th>Axis</th><th>Steps/mm</th><th>Microsteps</th><th>Max mm/min</th><th>Accel mm/s²</th><th>Travel ± <span class="u">mm</span></th></tr></thead>
+      <tbody>
+        <tr data-v="a"><th>Melody motor</th><td><select data-k="axis"></select></td><td><input data-k="steps" type="number" step="any" min="0.1"></td><td><input data-k="micro" type="number" step="1" min="1"></td><td><input data-k="max" type="number" step="any" min="1"></td><td><input data-k="accel" type="number" step="any" min="1"></td><td><input data-k="box" type="number" step="any" min="0.01"></td></tr>
+        <tr data-v="b"><th>Bass motor</th><td><select data-k="axis"></select></td><td><input data-k="steps" type="number" step="any" min="0.1"></td><td><input data-k="micro" type="number" step="1" min="1"></td><td><input data-k="max" type="number" step="any" min="1"></td><td><input data-k="accel" type="number" step="any" min="1"></td><td><input data-k="box" type="number" step="any" min="0.01"></td></tr>
+      </tbody>
+    </table>
+    <div class="row checks">
+      <label><input type="checkbox" id="diameter"> Lathe: X words are diameter</label>
+      <label><input type="checkbox" id="g7"> Lathe: G7 diameter mode</label>
+      <label><input type="checkbox" id="numbers"> N line numbers</label>
+    </div>
+    <div class="grid two">
+      <label>Start code (runs absolute, G90) <textarea id="start" rows="2" spellcheck="false" placeholder="optional, e.g. G0 X50 Y50"></textarea></label>
+      <label>End code <textarea id="end" rows="2" spellcheck="false" placeholder="optional"></textarea></label>
+    </div>
+    <p class="hint">Steps/mm is the number already set in your firmware ($100 to $102 on grbl, M92 on Marlin). Microsteps is the driver setting: a stepper sings at its full-step rate, so this sets the pitch. Max rate and accel limit which notes your machine can reach.</p>
+  </section>
+
+  <section id="result" hidden>
+    <h2><b>5</b> YOUR G-CODE</h2>
+    <div id="stats" class="stats"></div>
+    <div id="warn" class="warn"></div>
+    <canvas id="plot" width="900" height="220" aria-label="Notes over time for both motors"></canvas>
+    <div class="row">
+      <button type="button" id="listen">▶ LISTEN</button>
+      <button type="button" id="download" class="go">⬇ DOWNLOAD .nc</button>
+      <button type="button" id="copy">COPY</button>
+    </div>
+    <p class="hint">LISTEN plays the two motor lines as tones at the pitch your machine will sing them. The program moves relative to wherever the tool is, stays inside the travel box, and ends where it started. Jog to a clear spot, keep hands off, and be ready to hit feed hold.</p>
+    <pre id="code"></pre>
+  </section>
+</main>
+<footer>
+  <p><b>Sharing songs:</b> converting a song you own for your own machine is up to you, but tabs, MIDI files and g-code of copyrighted songs should not be posted publicly. Public-domain music (Bach, Beethoven, Grieg, traditional tunes) is free to share. Your files never leave this page: everything runs in your browser.</p>
+  <p>SONGCODE © 2026 Rev. J. Money / JMSCNC (<a href="https://jmscnc.com">jmscnc.com</a>), GPL-3.0-or-later. Guitar Pro reading by <a href="https://www.alphatab.net">alphaTab</a> (MPL-2.0). Made for the <a href="https://revjmoney.github.io/revturn-lathe-firmware/">REVTURN lathe</a>, works on any grbl, grblHAL, LinuxCNC or Marlin machine.</p>
+</footer>
+<script type="module" src="main.js"></script>
+</body>
+</html>

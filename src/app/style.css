@@ -1,0 +1,56 @@
+:root {
+  --bg: #0b1016; --panel: #111a23; --line: #22313f; --text: #d8e4ee; --dim: #8aa0b2;
+  --green: #7fffb0; --amber: #ffb347; --red: #ff5a4a; --blue: #6cc4ff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+header, main, footer { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 22px; }
+h1 { margin: 0; font: bold 34px Consolas, monospace; color: var(--green); letter-spacing: 2px; text-shadow: 0 0 8px rgba(127,255,176,.45); }
+h1 small { font-size: 15px; color: var(--dim); letter-spacing: 0; text-shadow: none; }
+header p { margin: 4px 0 14px; color: var(--dim); }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+h2 { margin: 0 0 10px; font: bold 16px Consolas, monospace; letter-spacing: 1px; }
+h2 b { display: inline-block; width: 26px; height: 26px; line-height: 26px; text-align: center; border-radius: 50%; background: var(--green); color: #06110a; margin-right: 6px; }
+.hint { color: var(--dim); font-size: 13px; margin: 8px 0 0; }
+.drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 26px 14px; text-align: center; cursor: pointer; color: var(--dim); }
+.drop:hover, .drop.over { border-color: var(--green); color: var(--text); }
+.drop input { display: none; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; align-items: center; }
+.book { display: flex; flex-direction: column; gap: 4px; color: var(--dim); font-size: 14px; width: 100%; }
+.checks label { color: var(--dim); font-size: 14px; }
+button { font: bold 14px Consolas, monospace; background: #1a2733; color: var(--text); border: 1px solid #2f4456; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+button:hover { border-color: var(--green); }
+button.go { background: var(--green); color: #06110a; border-color: var(--green); }
+button.on { background: var(--amber); color: #1a1000; border-color: var(--amber); }
+.info { margin-top: 10px; font-family: Consolas, monospace; color: var(--green); }
+.info.err { color: var(--red); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.grid.two { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin-top: 10px; }
+.grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--dim); }
+.grid label.wide { grid-column: span 2; }
+input, select, textarea { font: 14px Consolas, monospace; background: #0a1118; color: var(--text); border: 1px solid #2f4456; border-radius: 6px; padding: 7px 8px; width: 100%; }
+input[type=checkbox] { width: auto; }
+textarea { resize: vertical; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+#tracktable td.name { white-space: normal; min-width: 120px; }
+#tracktable .roles button { padding: 5px 8px; font-size: 12px; }
+#tracktable .roles button.on.mel { background: var(--green); border-color: var(--green); color: #06110a; }
+#tracktable .roles button.on.fill { background: var(--blue); border-color: var(--blue); color: #021018; }
+#tracktable .roles button.on.bass { background: var(--amber); border-color: var(--amber); color: #1a1000; }
+.axes { margin-top: 10px; }
+.axes th { color: var(--dim); font-weight: normal; font-size: 13px; }
+.axes input, .axes select { min-width: 70px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.stats div { background: #0a1118; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.stats b { display: block; font: bold 20px Consolas, monospace; color: var(--green); }
+.stats span { font-size: 12px; color: var(--dim); }
+.warn { color: var(--amber); font-size: 14px; margin-top: 8px; }
+canvas { width: 100%; height: auto; margin-top: 10px; background: #0a1118; border: 1px solid var(--line); border-radius: 8px; }
+pre { max-height: 300px; overflow: auto; background: #0a1118; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12px Consolas, monospace; color: #b8ffd4; }
+footer { color: var(--dim); font-size: 13px; padding-bottom: 30px; }
+footer a { color: var(--blue); }
+@media (max-width: 640px) { .grid label.wide { grid-column: span 1; } h1 { font-size: 26px; } }
