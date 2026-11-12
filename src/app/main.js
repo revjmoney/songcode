@@ -10,6 +10,7 @@ import { bookMidi } from '../music/book.js';
 import { BOOK } from '../../songs/book.js';
 import { noteName } from '../music/voices.js';
 import { autoPick, monoOf, PRESETS, songcode } from '../music/arrange.js';
+import { startRain } from './rain.js';
 
 const $ = (id) => document.getElementById(id);
 const AXES = ['X', 'Y', 'Z', 'A', 'B', 'C'];
@@ -201,3 +202,4 @@ function fmtS(s) { const m = Math.floor(s / 60), r = Math.round(s % 60); return 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 loadProfile();
+startRain();

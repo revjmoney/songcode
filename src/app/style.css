@@ -5,12 +5,13 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
-header, main, footer { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+#rain { position: fixed; inset: 0; z-index: 0; opacity: 0.55; pointer-events: none; }
+header, main, footer { position: relative; z-index: 1; max-width: 980px; margin: 0 auto; padding: 0 16px; }
 header { padding-top: 22px; }
 h1 { margin: 0; font: bold 34px Consolas, monospace; color: var(--green); letter-spacing: 2px; text-shadow: 0 0 8px rgba(127,255,176,.45); }
 h1 small { font-size: 15px; color: var(--dim); letter-spacing: 0; text-shadow: none; }
 header p { margin: 4px 0 14px; color: var(--dim); }
-section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+section { background: rgba(17, 26, 35, 0.86); backdrop-filter: blur(2px); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
 h2 { margin: 0 0 10px; font: bold 16px Consolas, monospace; letter-spacing: 1px; }
 h2 b { display: inline-block; width: 26px; height: 26px; line-height: 26px; text-align: center; border-radius: 50%; background: var(--green); color: #06110a; margin-right: 6px; }
 .hint { color: var(--dim); font-size: 13px; margin: 8px 0 0; }
