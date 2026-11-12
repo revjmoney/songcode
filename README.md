@@ -155,6 +155,10 @@ for the REVTURN lathe and for a typical grbl X+Y machine (80 steps/mm at 16x, ±
 | When the Saints Go Marching In | Traditional | 28 s | [mid](songs/midi/saints.mid) | [gp](songs/tabs/saints.gp) | [lathe](songs/gcode/saints-revturn.nc) · [grbl X+Y](songs/gcode/saints-grbl-xy.nc) |
 | Scarborough Fair | Traditional | 26 s | [mid](songs/midi/scarborough-fair.mid) | [gp](songs/tabs/scarborough-fair.gp) | [lathe](songs/gcode/scarborough-fair-revturn.nc) · [grbl X+Y](songs/gcode/scarborough-fair-grbl-xy.nc) |
 | Canon in D | Johann Pachelbel, about 1690 | 35 s | [mid](songs/midi/canon-in-d.mid) | [gp](songs/tabs/canon-in-d.gp) | [lathe](songs/gcode/canon-in-d-revturn.nc) · [grbl X+Y](songs/gcode/canon-in-d-grbl-xy.nc) |
+| Symphony No. 5 (opening) | Ludwig van Beethoven, 1808 | 31 s | [mid](songs/midi/beethoven-5.mid) | [gp](songs/tabs/beethoven-5.gp) | [lathe](songs/gcode/beethoven-5-revturn.nc) · [grbl X+Y](songs/gcode/beethoven-5-grbl-xy.nc) |
+| Turkish March (The Ruins of Athens) | Ludwig van Beethoven, 1811 | 58 s | [mid](songs/midi/turkish-march.mid) | [gp](songs/tabs/turkish-march.gp) | [lathe](songs/gcode/turkish-march-revturn.nc) · [grbl X+Y](songs/gcode/turkish-march-grbl-xy.nc) |
+
+The arrangements mark slides with `~` (Turkish March, Symphony No. 5, Mountain King); the REVTURN lathe screen bends those notes, SONGCODE's g-code plays them as plain notes for now.
 
 ⚠️ The ready-made g-code assumes those exact machine numbers. For your machine, open the song in SONGCODE and
 enter your own. Read **SAFETY FIRST!!** and **Where to put zero** before running any of them.

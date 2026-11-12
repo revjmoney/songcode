@@ -14,7 +14,7 @@
 | Flavors: grbl/grblHAL (G4 P sec, M30), LinuxCNC (M2), Marlin (G4 P ms, no N, no M30) | done 2026-11-12 |
 | LISTEN (square-wave preview at the machine's pitches), notes plot, stats, travel check, download, copy | done 2026-11-12 |
 | Machine settings remembered in the browser (localStorage) | done 2026-11-12 |
-| Free song book: 11 public-domain tunes arranged by JMSCNC, as MIDI, Guitar Pro tab and g-code | done 2026-11-12 |
+| Free song book: 13 public-domain tunes arranged by JMSCNC, as MIDI, Guitar Pro tab and g-code | done 2026-11-12 |
 | One-file build (dist/index.html), GitHub Pages workflow | done 2026-11-12 |
 
 ## Settings (preset defaults)
@@ -33,3 +33,4 @@ Section default: 8 s before the melody, 60 s long. Fill gap 0.6 s. Bass notes sh
 - 2026-11-12: first version. The arranger moved here from the REVTURN tools (`gen-gp-song.mjs` now imports it);
   the REVTURN lathe preset writes byte-identical programs to the old tool (checked on 60 song cases).
   Tested on the lathe: Somebody Told Me (made in the page, private), Für Elise (shipped g-code, video in docs/media).
+- 2026-11-12: added Beethoven Symphony No. 5 (opening) and the Turkish March (in E, grace notes as slides; melody notes read from a MIDI in Rev's collection, arrangement by JMSCNC). Slides play in the REVTURN screen's song book; SONGCODE's g-code plays the plain notes.
