@@ -20,6 +20,10 @@ let html = await readFile(p('src/app/index.html'), 'utf8');
 html = html
   .replace('<link rel="stylesheet" href="style.css">', () => `<style>${css}</style>`)
   .replace('<script type="module" src="main.js"></script>', () => `<script>${script}</script>`);
+for (const img of ['brand/monkey-320.png', 'brand/monkey-64.png']) {
+  const b64 = (await readFile(p(`src/app/${img}`))).toString('base64');
+  html = html.replaceAll(`"${img}"`, `"data:image/png;base64,${b64}"`);
+}
 if (html.includes('src="main.js"') || html.includes('href="style.css"')) throw new Error('inlining failed');
 await mkdir(p('dist'), { recursive: true });
 await writeFile(p('dist/index.html'), html);

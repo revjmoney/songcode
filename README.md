@@ -1,3 +1,5 @@
+<a href="https://jmscnc.com"><img src="src/app/brand/monkey-320.png" alt="JMSCNC monkey" width="130" align="right"></a>
+
 # 🎵 SONGCODE by JMSCNC
 
 ### Guitar Pro tabs and MIDI files in. G-code out. Your CNC's stepper motors play the song.
