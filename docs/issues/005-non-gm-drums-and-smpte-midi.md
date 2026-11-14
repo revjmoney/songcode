@@ -1,3 +1,9 @@
+# DONE in 0.4.0 (local `cos/next-steps`, 2026-11-14) — Non-GM drum maps and SMPTE timing
+
+This draft was implemented on the local branch. It was **not** filed on GitHub.
+
+---
+
 # Non-GM drum channels and SMPTE-timed MIDI
 
 **Type:** caveat
@@ -17,3 +23,8 @@
 ## Workaround
 
 In a DAW or a MIDI editor, move the kit to channel 10 before dropping the file in, or mute that track.
+
+
+## Resolution (0.4.0)
+
+`parseMidi` accepts SMPTE division, including 29.97 drop-frame, and converts ticks as wall-clock (fps × ticks-per-frame). GS/XG bank-select, kit-style names, channel 10, and Guitar Pro percussion staves are collected as drum parts. The parts table has a DRUMS toggle and a GM / GS / XG map. Tests use synthetic MIDI fixtures.

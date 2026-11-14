@@ -91,3 +91,9 @@ footer a { color: var(--blue); }
 #path-3d:checked ~ * { cursor: grab; }
 #path-wrap:has(#path-3d:checked) #pathplot { cursor: grab; }
 #path-wrap:has(#path-3d:checked) #pathplot:active { cursor: grabbing; }
+#tracktable .roles button.on.drums { background: #c9a0ff; border-color: #c9a0ff; color: #1a1020; }
+.drum-map { gap: 14px; align-items: flex-start; margin-top: 10px; }
+.drum-map[hidden] { display: none; }
+.drum-map label { color: var(--dim); font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+.drum-map select { width: auto; min-width: 200px; }
+#junction { max-width: 160px; }

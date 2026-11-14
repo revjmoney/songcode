@@ -12,7 +12,7 @@
 // legato-slide and bend effects are read from the score, then the effects are stripped before MIDI generation so
 // destination notes are not absorbed into a bend, and the flags are overlaid back onto the parsed notes.
 import { parseMidi } from './midi.js';
-import { gmDrum } from './voices.js';
+import { mapDrum, drumNameGuess } from './voices.js';
 
 const uniq = (out, name) => { let n = String(name || '').trim() || 'Track'; while (n in out) n += "'"; return n; };
 
@@ -20,20 +20,59 @@ const keepSlide = ({ t, dur, key, slide, slideTo }) => ({
   t, dur, key, ...(slide ? { slide: true } : {}), ...(slideTo != null ? { slideTo } : {}),
 });
 
-export function fromMidiBytes(bytes, title = '') {
+export function notesToDrums(notes, map = 'GM') {
+  const drums = [];
+  for (const n of notes ?? []) {
+    const piece = mapDrum(n.key, map);
+    if (piece) drums.push({ t: n.t, dur: n.dur, key: n.key, piece });
+  }
+  return drums;
+}
+
+export function isAutoDrumTrack(tr) {
+  return tr.channel === 9 || !!tr.drum || drumNameGuess(tr.name);
+}
+
+export function applyDrumMap(song, map = 'GM') {
+  song.drumMap = map;
+  const drums = [];
+  for (const ns of Object.values(song.drumTracks ?? {})) drums.push(...notesToDrums(ns, map));
+  song.drums = drums;
+  return song;
+}
+
+export function markTrackAsDrums(song, name) {
+  if (!song?.tracks?.[name]) return song;
+  song.drumTracks = song.drumTracks ?? {};
+  let dest = name;
+  while (dest in song.drumTracks) dest += "'";
+  song.drumTracks[dest] = song.tracks[name];
+  delete song.tracks[name];
+  return applyDrumMap(song, song.drumMap ?? 'GM');
+}
+
+export function markTrackAsPitched(song, name) {
+  if (!song?.drumTracks?.[name]) return song;
+  let dest = name;
+  while (dest in (song.tracks ?? {})) dest += "'";
+  song.tracks[dest] = song.drumTracks[name];
+  delete song.drumTracks[name];
+  return applyDrumMap(song, song.drumMap ?? 'GM');
+}
+
+export function fromMidiBytes(bytes, title = '', { drumMap = 'GM' } = {}) {
   const m = parseMidi(bytes);
-  const tracks = {}, drums = [];
+  const tracks = {}, drumTracks = {}, drums = [];
   for (const tr of m.tracks) {
-    if (tr.channel === 9) {                                          // General MIDI drums
-      for (const n of tr.notes) {
-        const piece = gmDrum(n.key);
-        if (piece) drums.push({ t: n.t, dur: n.dur, key: n.key, piece });
-      }
+    if (isAutoDrumTrack(tr)) {
+      const name = uniq(drumTracks, tr.name);
+      drumTracks[name] = tr.notes.map(({ t, dur, key }) => ({ t, dur, key }));
+      drums.push(...notesToDrums(tr.notes, drumMap));
       continue;
     }
     tracks[uniq(tracks, tr.name)] = tr.notes.map(keepSlide);
   }
-  return { title, artist: '', kind: 'MIDI', tracks, drums, length: m.length, bpm: m.bpm };
+  return { title, artist: '', kind: 'MIDI', tracks, drums, drumTracks, drumMap, length: m.length, bpm: m.bpm, timing: m.timing };
 }
 
 // Walk written notes (ties merged). A slide-out / bend marks this note; a slide-in marks the previous note.
@@ -124,23 +163,22 @@ export function fromGuitarPro(alphaTab, bytes) {
   midi.format = alphaTab.midi.MidiFileFormat.MultiTrack;
   new alphaTab.midi.MidiFileGenerator(score, settings, new alphaTab.midi.AlphaSynthMidiFileHandler(midi, true)).generate();
   const m = parseMidi(midi.toBinary());
-  const tracks = {}, drums = [];
+  const tracks = {}, drumTracks = {}, drums = [];
   for (const st of score.tracks) {
     const chs = new Set([st.playbackInfo.primaryChannel, st.playbackInfo.secondaryChannel]);
     const notes = m.tracks.filter((t) => chs.has(t.channel)).flatMap((t) => t.notes)
       .sort((a, b) => a.t - b.t || b.key - a.key);
     if (st.isPercussion) {
-      for (const n of notes) {
-        const piece = gmDrum(n.key);
-        if (piece) drums.push({ t: n.t, dur: n.dur, key: n.key, piece });
-      }
+      const name = uniq(drumTracks, st.name || `Track ${st.index + 1}`);
+      drumTracks[name] = notes.map(({ t, dur, key }) => ({ t, dur, key }));
+      drums.push(...notesToDrums(notes, 'GM'));
       continue;
     }
     overlaySlideFlags(notes, flagsByTrack[st.index] ?? []);
     const pitched = notes.map(keepSlide);
     if (pitched.length) tracks[uniq(tracks, st.name || `Track ${st.index + 1}`)] = pitched;
   }
-  return { title: score.title || '', artist: score.artist || '', kind: 'Guitar Pro', tracks, drums, length: m.length, bpm: score.tempo };
+  return { title: score.title || '', artist: score.artist || '', kind: 'Guitar Pro', tracks, drums, drumTracks, drumMap: 'GM', length: m.length, bpm: score.tempo, timing: m.timing };
 }
 
 export function loadSong(alphaTab, bytes, fileName = '') {

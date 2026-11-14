@@ -76,6 +76,18 @@ await js(`(() => { const r = document.querySelector('.axes tr[data-v=b] select[d
 await sleep(800);
 await shotOf('13-rotary-option.png', '#machine', '#result');
 
+await set('#book', 'mountain-king'); await sleep(400);
+await set('#preset', 'REVTURN lathe'); await sleep(900);
+await js(`(() => { const r = document.getElementById('rotary'); if (r && r.checked) { r.checked = false; r.dispatchEvent(new Event('input', { bubbles: true })); } })()`);
+await sleep(400);
+await js(`document.getElementById('junction').scrollIntoView()`); await sleep(300);
+await shotOf('14-listen-planner.png', '#machine', '#result');
+
+await openFile('test/fixtures/gs-kit.mid', 'gs-kit.mid'); await sleep(1500);
+await js(`document.getElementById('drum-map').value = 'GS'; document.getElementById('drum-map').dispatchEvent(new Event('change', { bubbles: true }));`);
+await sleep(500);
+await shotOf('15-drum-map.png', '#open', '#tracks');
+
 await size(390, 844, true); await cdp('Page.reload'); await sleep(1500);
 await set('#book', 'canon-in-d'); await sleep(800);
 await shot('09-phone.png');

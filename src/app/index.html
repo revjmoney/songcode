@@ -40,8 +40,18 @@
 
   <section id="tracks" hidden>
     <h2><b>2</b> PICK THE PARTS</h2>
-    <p class="hint">Melody plays on the first motor. Fill plays in the melody's rests (a riff or lead guitar). Bass plays on the second motor. Each motor plays one note at a time: chords keep their top note (melody) or bottom note (bass).</p>
+    <p class="hint">Melody plays on the first motor. Fill plays in the melody's rests (a riff or lead guitar). Bass plays on the second motor. Each motor plays one note at a time: chords keep their top note (melody) or bottom note (bass). Mark a part as <b>DRUMS</b> if it is a kit that is not on General MIDI channel 10 (GS/XG bank, a named kit, or a Guitar Pro percussion staff). Those hits can then play on Z when the drum option is on.</p>
     <div class="tablewrap"><table id="tracktable"></table></div>
+    <div id="drum-map-row" class="row drum-map" hidden>
+      <label>Drum map
+        <select id="drum-map">
+          <option value="GM">General MIDI</option>
+          <option value="GS">Roland GS</option>
+          <option value="XG">Yamaha XG</option>
+        </select>
+      </label>
+      <p class="hint">The map turns kit note numbers into kick / snare / hat / tom hits. Auto-detected drum parts start on the GM map; switch this if the kicks land on the wrong piece.</p>
+    </div>
   </section>
 
   <section id="section" hidden>
@@ -107,7 +117,10 @@
       <label>Start code (runs absolute, G90) <textarea id="start" rows="2" spellcheck="false" placeholder="optional, e.g. G0 X50 Y50"></textarea></label>
       <label>End code <textarea id="end" rows="2" spellcheck="false" placeholder="optional"></textarea></label>
     </div>
-    <p class="hint">Steps/mm is the number already set in your firmware ($100 to $102 on grbl, M92 on Marlin). Microsteps is the driver setting: a stepper sings at its full-step rate, so this sets the pitch. Max rate and accel limit which notes your machine can reach.</p>
+    <div class="grid">
+      <label>Junction deviation (mm) <input type="number" id="junction" min="0.0001" step="0.001" value="0.01"></label>
+    </div>
+    <p class="hint">Steps/mm is the number already set in your firmware ($100 to $102 on grbl, M92 on Marlin). Microsteps is the driver setting: a stepper sings at its full-step rate, so this sets the pitch. Max rate and accel limit which notes your machine can reach. Junction deviation is $11 on grbl (0.01 mm default), the same idea on Marlin, and a blending stand-in on LinuxCNC. It only changes the LISTEN planner, not the written g-code.</p>
   </section>
 
   <section id="result" hidden>
@@ -130,7 +143,7 @@
       <button type="button" id="download" class="go">⬇ DOWNLOAD .nc</button>
       <button type="button" id="copy">COPY</button>
     </div>
-    <p class="hint" id="listen-hint">LISTEN plays the motor lines as tones, with each axis ramping at your accel setting, so a slow motor (REVTURN Z at 12 mm/s²) takes time to reach pitch, as it does on the machine. The program moves relative to wherever the tool is, stays inside the travel box, and ends where it started. Jog to a clear spot, keep hands off, and be ready to hit feed hold.</p>
+    <p class="hint" id="listen-hint">LISTEN follows a grbl-style planner (trapezoid accel/decel, junction-deviation cornering, lookahead, and per-axis max rate/accel), so the preview's timing and pitch match what the machine does with this program. Notes the planner cannot bring up to the written feed are listed in the warnings. The program moves relative to wherever the tool is, stays inside the travel box, and ends where it started. Jog to a clear spot, keep hands off, and be ready to hit feed hold.</p>
     <pre id="code"></pre>
   </section>
 </main>

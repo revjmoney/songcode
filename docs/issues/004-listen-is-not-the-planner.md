@@ -1,3 +1,9 @@
+# DONE in 0.4.0 (local `cos/next-steps`, 2026-11-14) — LISTEN matches the motion planner
+
+This draft was implemented on the local branch. It was **not** filed on GitHub.
+
+---
+
 # LISTEN models per-axis accel, not the full motion planner
 
 **Type:** caveat
@@ -21,3 +27,8 @@ On a well-tuned machine with long notes, LISTEN is close. On short, fast notes, 
 ## Suggested work
 
 Optional: drive LISTEN from the same slice times and `fromStop` shortening that `buildSong` already computes, so the preview and the program share one timeline. A full planner port is not needed.
+
+
+## Resolution (0.4.0)
+
+LISTEN plans the generated g-code with a grbl-style trapezoid, junction deviation, lookahead, and per-axis max/accel (`src/music/planner.js`). The preview follows those axis velocities. Moves that never cruise at the written feed are warned. Junction deviation is per preset (and editable) and does not change the g-code. Hand-computed tests are in `test/songcode.test.js`.

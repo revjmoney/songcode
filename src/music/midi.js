@@ -7,14 +7,31 @@
 
 const str = (b, i, n) => String.fromCharCode(...b.subarray(i, i + n));
 
+// SMF division: PPQ, or SMPTE (high bit set) with fps in a signed high byte and ticks-per-frame.
+// The 29 fps code is 29.97 drop-frame (30/1.001). 24, 25 and 30 are used as written.
+export function parseDivision(div) {
+  div = div & 0xffff;
+  if ((div & 0x8000) === 0) return { smpte: false, ppq: div };
+  const fpsCode = 256 - ((div >> 8) & 0xff);              // 24, 25, 29, 30
+  const ticksPerFrame = div & 0xff;
+  const dropFrame = fpsCode === 29;
+  const fps = dropFrame ? 30 / 1.001 : fpsCode;
+  return { smpte: true, ppq: 0, fpsCode, fps, ticksPerFrame, dropFrame };
+}
+
+export function smpteDivision(fpsCode, ticksPerFrame) {
+  const code = fpsCode === 29.97 ? 29 : fpsCode;
+  return (((256 - (code | 0)) & 0xff) << 8) | (ticksPerFrame & 0xff);
+}
+
 export function parseMidi(input) {
   const b = input instanceof Uint8Array ? input : new Uint8Array(input);
   if (b.length < 14 || str(b, 0, 4) !== 'MThd') throw new Error('not a MIDI file');
   const u16 = (i) => (b[i] << 8) | b[i + 1];
   const u32 = (i) => ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
   const hlen = u32(4), format = u16(8), ntr = u16(10), div = u16(12);
-  if (div & 0x8000) throw new Error('SMPTE-timed MIDI files are not supported');
-  const ppq = div;
+  const timing = parseDivision(div);
+  const ppq = timing.smpte ? 0 : timing.ppq;
   let p = 8 + hlen;
   const raw = [];                                        // per track: events with absolute ticks
   const tempos = [];                                      // [tick, usPerQuarter]
@@ -46,19 +63,26 @@ export function parseMidi(input) {
     raw.push(ev);
     p = end;
   }
-  // tick -> seconds through the tempo map (default 120 bpm)
-  tempos.sort((x, y) => x[0] - y[0]);
-  const map = [[0, 0, 500000]];                           // [tick, seconds at tick, us per quarter]
-  for (const [tk, us] of tempos) {
-    const [t0, s0, u0] = map[map.length - 1];
-    const sec = s0 + ((tk - t0) * u0) / ppq / 1e6;
-    if (tk === t0) map[map.length - 1] = [tk, s0, us]; else map.push([tk, sec, us]);
+  // tick -> seconds: PPQ uses the tempo map (default 120 bpm). SMPTE ticks are wall-clock
+  // (fps × ticks-per-frame), including 29.97 drop-frame; tempo meta events are ignored.
+  let toSec;
+  if (timing.smpte) {
+    const tickRate = timing.fps * timing.ticksPerFrame;
+    toSec = (tk) => (tickRate > 0 ? tk / tickRate : 0);
+  } else {
+    tempos.sort((x, y) => x[0] - y[0]);
+    const map = [[0, 0, 500000]];                           // [tick, seconds at tick, us per quarter]
+    for (const [tk, us] of tempos) {
+      const [t0, s0, u0] = map[map.length - 1];
+      const sec = s0 + ((tk - t0) * u0) / ppq / 1e6;
+      if (tk === t0) map[map.length - 1] = [tk, s0, us]; else map.push([tk, sec, us]);
+    }
+    toSec = (tk) => {
+      let k = map.length - 1; while (k > 0 && map[k][0] > tk) k--;
+      const [t0, s0, u0] = map[k];
+      return s0 + ((tk - t0) * u0) / ppq / 1e6;
+    };
   }
-  const toSec = (tk) => {
-    let k = map.length - 1; while (k > 0 && map[k][0] > tk) k--;
-    const [t0, s0, u0] = map[k];
-    return s0 + ((tk - t0) * u0) / ppq / 1e6;
-  };
   const tracks = [];
   let length = 0;
   for (const tr of raw) {
@@ -83,7 +107,33 @@ export function parseMidi(input) {
     }
   }
   applyMidiExpression(tracks, raw, toSec);
-  return { format, ppq, tracks, length, bpm: Math.round(60e6 / (tempos[0]?.[1] ?? 500000)) };
+  const drumCh = detectDrumChannels(raw);
+  for (const tr of tracks) {
+    if (drumCh.has(tr.channel)) tr.drum = true;
+  }
+  return {
+    format, ppq, tracks, length,
+    bpm: Math.round(60e6 / (tempos[0]?.[1] ?? 500000)),
+    timing,
+    drumChannels: [...drumCh],
+  };
+}
+
+// Channel 10 (index 9) is always drums. A bank MSB of 120 / 126 / 127 (GS / XG kit) marks
+// that channel as a drum part even when it is not channel 10.
+export function detectDrumChannels(raw) {
+  const ch = new Set([9]);
+  for (const tr of raw ?? []) {
+    const msb = {};
+    for (const e of tr.events ?? []) {
+      if (e.cc && e.num === 0) msb[e.ch] = e.value;
+      if (e.cc && (e.num === 0 || e.num === 32)) {
+        const v = e.num === 0 ? e.value : msb[e.ch];
+        if (v === 120 || v === 126 || v === 127) ch.add(e.ch);
+      }
+    }
+  }
+  return ch;
 }
 
 // Pitch-bend sensitivity (RPN 0,0) defaults to 2 semitones. A bend or a portamento (CC 65)
