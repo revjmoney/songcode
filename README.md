@@ -111,7 +111,7 @@ Each motor plays one note at a time: chords keep their top note (melody) or bott
 
 [![Section and machine settings](docs/screenshots/03-section-and-machine.png)](docs/screenshots/03-section-and-machine.png)
 
-- **From / To:** the part of the song to play (it starts 8 s before the melody by default). **Repeat** loops it.
+- **From / To:** the part of the song to play. Uploaded files start 8 s before the melody and run 60 s, with a notice and a **Use the whole song** button if that is only a slice. Book songs open at full length. **Repeat** loops the section.
 - **Speed %** and **Transpose** change tempo and key. **Fill gap** sets how long a melody rest must be before the fill plays.
 - **Machine:** pick a preset (REVTURN lathe, grbl mill / router, Marlin 3D printer, LinuxCNC) and edit it:
   - **Axis**: which two axes sing (X, Y, Z, A, B or C).
@@ -121,12 +121,14 @@ Each motor plays one note at a time: chords keep their top note (melody) or bott
   - **Travel ±**: how far each axis may wander from the start point.
 - **Flavor** sets the dialect: grbl/grblHAL and LinuxCNC dwell in seconds, Marlin dwells in milliseconds, uses no
   line numbers and no `M30`. Your settings are remembered in your browser.
+- **REVTURN only, off by default:** a third voice on C (chuck, spindle stays off) and, when a file has GM drums,
+  kicks and snares on Z under the melody (the bass line is left out). Two-axis X+Z output stays the default.
 
 ### 4. Listen, check, download
 
 [![The g-code result](docs/screenshots/04-result-grbl.png)](docs/screenshots/04-result-grbl.png)
 
-**▶ LISTEN** plays both motor lines as tones at the pitch your machine will sing them. The plot shows every note
+**▶ LISTEN** plays both motor lines as tones, ramping at each axis's accel, so a slow motor (REVTURN Z at 12 mm/s²) takes time to reach pitch, as it does on the machine. The plot shows every note
 (green = melody, orange = bass). Check the **travel** numbers against your machine, then **⬇ DOWNLOAD .nc** and run
 it from your sender (gSender, UGS, CNCjs, the REVTURN screen, OctoPrint, LinuxCNC...).
 
@@ -160,7 +162,7 @@ for the REVTURN lathe and for a typical grbl X+Y machine (80 steps/mm at 16x, ±
 | Symphony No. 5 (opening) | Ludwig van Beethoven, 1808 | 31 s | [mid](songs/midi/beethoven-5.mid) | [gp](songs/tabs/beethoven-5.gp) | [lathe](songs/gcode/beethoven-5-revturn.nc) · [grbl X+Y](songs/gcode/beethoven-5-grbl-xy.nc) |
 | Turkish March (The Ruins of Athens) | Ludwig van Beethoven, 1811 | 58 s | [mid](songs/midi/turkish-march.mid) | [gp](songs/tabs/turkish-march.gp) | [lathe](songs/gcode/turkish-march-revturn.nc) · [grbl X+Y](songs/gcode/turkish-march-grbl-xy.nc) |
 
-The arrangements mark slides with `~` (Turkish March, Symphony No. 5, Mountain King); the REVTURN lathe screen bends those notes, SONGCODE's g-code plays them as plain notes for now.
+The arrangements mark slides with `~` (Turkish March, Symphony No. 5, Mountain King, and others). SONGCODE writes those as a pitch ramp in the g-code (the feed rate walks from one note to the next), same idea as the REVTURN screen's bends. Book songs are loaded from the arrangements so the `~` flags are kept; a MIDI or Guitar Pro you drop in still has no `~` marks unless you add them in the book.
 
 ⚠️ The ready-made g-code assumes those exact machine numbers. For your machine, open the song in SONGCODE and
 enter your own. Read **SAFETY FIRST!!** and **Where to put zero** before running any of them.
@@ -194,7 +196,9 @@ builds and publishes it on every push to `main` (`.github/workflows/pages.yml`).
 | `src/app/` | the page (HTML, CSS, JS) |
 | `src/music/load.js` | opens Guitar Pro (through alphaTab) and MIDI files |
 | `src/music/arrange.js` | picks the parts, melody + fill + bass, machine presets, start / end code |
-| `src/music/build.js` | the note-to-move engine: feed = pitch, legato moves, travel box, g-code words per flavor |
+| `src/music/build.js` | the note-to-move engine: feed = pitch, legato moves, travel box, g-code words per flavor, unused-by-default trio/drums |
+| `src/music/listen.js` | LISTEN accel ramps and the "is this only a 60 s slice?" window check |
+| `src/music/voices.js` | one-note lines, octave fit, `expandSlides` for `~` bends |
 | `songs/book.js` | the free song book (JMSCNC arrangements of public-domain tunes) |
 | `tools/make-songs.mjs` | writes `songs/midi`, `songs/tabs` and `songs/gcode`, and checks every tab against the book |
 | `tools/shots.mjs` | takes the README screenshots |
