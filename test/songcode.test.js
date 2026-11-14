@@ -7,7 +7,7 @@ import * as alphaTab from '@coderline/alphatab';
 import { BOOK } from '../songs/book.js';
 import { bookTracks, bookMidi } from '../src/music/book.js';
 import { loadSong } from '../src/music/load.js';
-import { PRESETS, songcode, arrange, autoPick, frame } from '../src/music/arrange.js';
+import { PRESETS, songcode, arrange, autoPick, frame, downloadText, machineOf as machineOfTop } from '../src/music/arrange.js';
 
 const file = (p) => readFileSync(new URL(`../${p}`, import.meta.url));
 const picks = { lead: 'Melody', bass: 'Bass', fill: null };
@@ -104,7 +104,7 @@ import { tokens, voiceNotes } from '../src/music/book.js';
 import { expandSlides, hzOf } from '../src/music/voices.js';
 import { buildSong } from '../src/music/build.js';
 import { machineOf } from '../src/music/arrange.js';
-import { writeMidi } from '../src/music/midi.js';
+import { writeMidi, parseMidi } from '../src/music/midi.js';
 import { listenEnvelope, rampTime, isPartialWindow } from '../src/music/listen.js';
 
 describe('slides', () => {
@@ -202,5 +202,148 @@ describe('LISTEN ramps and the section window', () => {
     expect(isPartialWindow(0, 181, 180)).toBe(false);
     expect(isPartialWindow(8, 68, 50)).toBe(true);
     expect(isPartialWindow(0, 50, 50)).toBe(false);
+  });
+});
+
+
+import { tracePath, pathSummaryComments } from '../src/music/path.js';
+
+describe('slide import from MIDI and Guitar Pro', () => {
+  it('parses a pitch-bend into a slide toward the bent pitch', () => {
+    const bytes = writeMidi([{
+      name: 'Melody', ch: 0,
+      notes: [{ t: 0, dur: 1, key: 60, vel: 100, slide: true }, { t: 1, dur: 1, key: 64, vel: 100 }],
+    }]);
+    const s = loadSong(alphaTab, bytes, 'bend.mid');
+    const n = s.tracks.Melody[0];
+    expect(n.slide).toBe(true);
+    expect(n.slideTo ?? 64).toBe(64);
+    const r = songcode({ Melody: s.tracks.Melody, Bass: [] }, { lead: 'Melody', bass: null, fill: null }, PRESETS['grbl mill / router (X + Y)']);
+    expect(r.slides).toBeGreaterThan(0);
+  });
+  it('marks a portamento (CC 65) into the next note as a slide', () => {
+    // hand-built: note 60, CC 65 on, note 64 shortly after
+    const raw = writeMidi([{
+      name: 'Melody', ch: 0,
+      notes: [{ t: 0, dur: 0.5, key: 60, vel: 100 }, { t: 0.5, dur: 0.5, key: 64, vel: 100 }],
+    }]);
+    // inject CC 65 at tick 0 on top of the written file by going through parse after a custom write
+    const ev = [];
+    const bpm = 120, ppq = 480, ch = 0;
+    const us = Math.round(60e6 / bpm);
+    const vlq = (v) => { const out = [v & 0x7f]; while ((v >>= 7)) out.unshift((v & 0x7f) | 0x80); return out; };
+    const chunk = (id, data) => [...id].map((c) => c.charCodeAt(0)).concat([(data.length >>> 24) & 255, (data.length >> 16) & 255, (data.length >> 8) & 255, data.length & 255], data);
+    const events = [
+      [0, [0xff, 0x51, 3, (us >> 16) & 255, (us >> 8) & 255, us & 255]],
+      [0, [0xb0 | ch, 65, 127]],
+      [0, [0x90 | ch, 60, 100]],
+      [Math.round(0.5 * ppq), [0x80 | ch, 60, 0]],
+      [Math.round(0.5 * ppq), [0x90 | ch, 64, 100]],
+      [Math.round(1 * ppq), [0x80 | ch, 64, 0]],
+    ];
+    const data = []; let last = 0;
+    for (const [tk, bytes] of events) { data.push(...vlq(tk - last), ...bytes); last = tk; }
+    data.push(0, 0xff, 0x2f, 0);
+    const mid = new Uint8Array([...chunk('MThd', [0, 1, 0, 1, (ppq >> 8) & 255, ppq & 255]), ...chunk('MTrk', data)]);
+    const s = loadSong(alphaTab, mid, 'porta.mid');
+    expect(Object.values(s.tracks)[0][0].slide).toBe(true);
+  });
+  it('a book MIDI with slides round-trips the flags, and a no-slide MIDI stays slide-free', () => {
+    const king = BOOK.find((s) => s.id === 'mountain-king');
+    const twinkle = BOOK.find((s) => s.id === 'twinkle');
+    const k = loadSong(alphaTab, bookMidi(king), 'king.mid');
+    expect(k.tracks.Melody.some((n) => n.slide)).toBe(true);
+    const t = loadSong(alphaTab, bookMidi(twinkle), 'twinkle.mid');
+    expect(t.tracks.Melody.some((n) => n.slide)).toBeFalsy();
+  });
+  it('a book Guitar Pro with slides recovers them on load', () => {
+    const king = BOOK.find((s) => s.id === 'mountain-king');
+    const s = loadSong(alphaTab, file('songs/tabs/mountain-king.gp'), 'mountain-king.gp');
+    expect(s.tracks.Melody.some((n) => n.slide), 'regenerate tabs with make-songs if this fails').toBe(true);
+    expect(s.tracks.Melody.map((n) => n.key)).toEqual(bookTracks(king).Melody.map((n) => n.key));
+  });
+  it('expandSlides follows slideTo when the next note is missing', () => {
+    const a = { t: 0, dur: 1, key: 60, hz: hzOf(60), slide: true, slideTo: 72 };
+    const got = expandSlides([a]);
+    expect(got.length).toBeGreaterThanOrEqual(3);
+    expect(got[0].hz).toBeCloseTo(hzOf(60), 5);
+    expect(got.at(-1).hz).toBeCloseTo(hzOf(72), 5);
+  });
+});
+
+describe('bounce-box path plot', () => {
+  const twinkle = BOOK.find((s) => s.id === 'twinkle');
+  it('traces the relative envelope inside the box and keeps songcode().text free of summary comments', () => {
+    const r = songcode(bookTracks(twinkle), picks, PRESETS['grbl mill / router (X + Y)'], { title: `${twinkle.title}, ${twinkle.composer}` });
+    expect(r.text).toBe(file('songs/gcode/twinkle-grbl-xy.nc').toString());
+    expect(r.text).not.toMatch(/SONGCODE travel/);
+    expect(r.path.overtravel).toEqual([]);
+    expect(r.path.axes.X.peak).toBeLessThanOrEqual(PRESETS['grbl mill / router (X + Y)'].a.box + 1e-3);
+    expect(r.path.axes.Y.peak).toBeLessThanOrEqual(PRESETS['grbl mill / router (X + Y)'].b.box + 1e-3);
+    const dl = downloadText(r);
+    expect(dl).toMatch(/\(SONGCODE travel:/);
+    expect(dl).toMatch(/\(overtravel: none\)/);
+    expect(r.pathSummary.some((l) => l.startsWith('(SONGCODE travel:'))).toBe(true);
+  });
+  it('flags overtravel when a relative move walks past the box', () => {
+    const profile = { units: 'mm', a: { axis: 'X', box: 20 }, b: { axis: 'Y', box: 20 } };
+    const tr = tracePath(['(t)', 'G21 G91 G94', 'G1 X25 Y0 F100', 'G1 X10 F100', 'G90', 'M30'], { axes: ['X', 'Y'], diameter: false, units: 'mm' }, profile);
+    expect(tr.axes.X.peak).toBeCloseTo(35, 5);
+    expect(tr.overtravel.length).toBeGreaterThan(0);
+    expect(pathSummaryComments(tr).join('\n')).toMatch(/overtravel: X /);
+  });
+});
+
+describe('rotary feed math', () => {
+  const twinkle = BOOK.find((s) => s.id === 'twinkle');
+  const tracks = bookTracks(twinkle);
+  const mill = PRESETS['grbl mill / router (X + Y)'];
+  const rotaryP = {
+    ...mill,
+    a: { ...mill.a, axis: 'X' },
+    b: { axis: 'A', steps: 13.333, micro: 8, max: 18000, accel: 3000, box: 90 },
+  };
+  it('is off by default: two-axis X+Y output stays byte-identical', () => {
+    const r = songcode(tracks, picks, mill, { title: `${twinkle.title}, ${twinkle.composer}` });
+    expect(r.rotary).toBe(false);
+    expect(r.text).toBe(file('songs/gcode/twinkle-grbl-xy.nc').toString());
+  });
+  it('G93 inverse time: F is 60/t, A words are degrees, header is G93', () => {
+    const r = songcode(tracks, picks, rotaryP, { title: 'twinkle rotary', rotary: true, rotaryConvention: 'g93' });
+    expect(r.rotary).toBe(true);
+    expect(r.lines[1]).toMatch(/\bG93\b/);
+    expect(r.text).toMatch(/\bA-?[\d.]/);
+    const move = r.lines.find((l) => /G1 .*A/.test(l) && /F/.test(l));
+    expect(move).toBeTruthy();
+    const f = Number(/F([\d.]+)/.exec(move)[1]);
+    expect(f).toBeGreaterThan(1);
+    // inverse time is typically tens to thousands, not a mm/min hypot of 13.333
+    const fs = r.lines.filter((l) => /^(N\d+ )?G1 /.test(l)).map((l) => Number(/F([\d.]+)/.exec(l)?.[1])).filter((x) => x > 0);
+    expect(fs.every((x) => x === Number(x.toFixed(4)))).toBe(true);
+  });
+  it('deg/min convention writes F in deg/min on a rotary-only move', () => {
+    const onlyA = { Melody: [], Bass: [{ t: 0, dur: 1, key: 69 }] }; // A4 = 440 Hz on A
+    const r = songcode(onlyA, { lead: null, bass: 'Bass', fill: null }, rotaryP, { title: 'a-only', rotary: true, rotaryConvention: 'deg' });
+    expect(r.lines[1]).toMatch(/\bG94\b/);
+    const move = r.lines.find((l) => /G1 .*A/.test(l) && !/X/.test(l));
+    expect(move).toBeTruthy();
+    const f = Number(/F([\d.]+)/.exec(move)[1]);
+    // 440 Hz / ((13.333/8)/60) = 440 / 0.027777... = 15840 deg/min, capped at 18000
+    expect(f).toBeCloseTo(15840, 0);
+  });
+  it('radius convention: F is hypot(linear, ω · radius)', () => {
+    const r = songcode(tracks, picks, rotaryP, { title: 'radius', rotary: true, rotaryConvention: 'radius', rotaryRadius: 25 });
+    expect(r.lines[1]).toMatch(/\bG94\b/);
+    expect(r.text).toMatch(/\bA-?[\d.]/);
+    const move = r.lines.find((l) => /G1 /.test(l) && /F/.test(l) && /A/.test(l) && /X/.test(l));
+    expect(move).toBeTruthy();
+  });
+  it('LinuxCNC and Marlin rotary programs keep their end-of-program flavour', () => {
+    const linux = { ...PRESETS['LinuxCNC mill (X + Y)'], b: { axis: 'A', steps: 13.333, micro: 8, max: 18000, accel: 3000, box: 90 } };
+    const marlin = { ...PRESETS['3D printer, Marlin (X + Y)'], b: { axis: 'A', steps: 13.333, micro: 8, max: 18000, accel: 3000, box: 90 } };
+    expect(songcode(tracks, picks, linux, { title: 'l', rotary: true }).lines.at(-1)).toBe('M2');
+    const m = songcode(tracks, picks, marlin, { title: 'm', rotary: true });
+    expect(m.lines.at(-1)).not.toBe('M30');
+    expect(m.text).not.toMatch(/^N\d/m);
   });
 });

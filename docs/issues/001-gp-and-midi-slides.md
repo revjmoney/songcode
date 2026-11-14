@@ -1,3 +1,9 @@
+# DONE in 0.3.0 (local `cos/next-steps`, 2026-11-14) — Guitar Pro and MIDI slide import
+
+This draft was implemented on the local branch. It was **not** filed on GitHub.
+
+---
+
 # Book-style `~` slides are not recovered from dropped MIDI or Guitar Pro files
 
 **Type:** enhancement
@@ -22,3 +28,8 @@ SONGCODE expands those into a feed-rate ramp in the g-code, and the page loads b
 ## Not in scope
 
 Changing how the book itself is notated.
+
+
+## Resolution (0.3.0)
+
+`fromGuitarPro` walks the score (ties merged), strips slide/bend effects so the MIDI generator keeps every destination note, and overlays `slide` / `slideTo` on the parsed notes. `parseMidi` turns pitch-bend (RPN 0,0) and portamento (CC 65) into the same flags. `bookMidi` writes a ±24-semitone RPN and a bend ramp for `~` notes. Shipped `.mid` / `.gp` files for slide songs were regenerated; songs without slides are unchanged.

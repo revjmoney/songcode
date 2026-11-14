@@ -16,7 +16,7 @@ mkdirSync(outDir, { recursive: true });
 const browser = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
   'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(existsSync);
 const port = 9334;
-const proc = spawn(browser, ['--headless=new', '--disable-gpu', `--remote-debugging-port=${port}`, `--user-data-dir=${join(tmpdir(), `songcode-shots-${Date.now()}`)}`, '--window-size=1280,900', 'about:blank'], { stdio: 'ignore' });
+const proc = spawn(browser, ['--headless=new', '--no-sandbox', '--disable-gpu', `--remote-debugging-port=${port}`, `--user-data-dir=${join(tmpdir(), `songcode-shots-${Date.now()}`)}`, '--window-size=1280,900', 'about:blank'], { stdio: 'ignore' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let target;
 for (let i = 0; i < 50 && !target; i++) { await sleep(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === 'page'); } catch { /* starting */ } }
@@ -65,6 +65,16 @@ await shotOf('07-marlin.png', '#result');
 await set('#book', 'mountain-king'); await sleep(400);
 await set('#preset', 'grbl mill / router (X + Y)'); await sleep(700);
 await shotOf('08-mountain-king-plot.png', '#stats', '#plot');
+
+await js(`document.getElementById('path-wrap').scrollIntoView()`); await sleep(400);
+await shotOf('12-path-plot.png', '#path-wrap');
+await js(`document.getElementById('path-3d').click()`); await sleep(400);
+await shotOf('12b-path-plot-3d.png', '#path-wrap');
+
+await set('#preset', 'grbl mill / router (X + Y)'); await sleep(300);
+await js(`(() => { const r = document.querySelector('.axes tr[data-v=b] select[data-k=axis]'); r.value = 'A'; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); document.getElementById('rotary').checked = true; document.getElementById('rotary').dispatchEvent(new Event('input', { bubbles: true })); document.getElementById('rotary-conv').value = 'g93'; document.getElementById('rotary-conv').dispatchEvent(new Event('input', { bubbles: true })); })()`);
+await sleep(800);
+await shotOf('13-rotary-option.png', '#machine', '#result');
 
 await size(390, 844, true); await cdp('Page.reload'); await sleep(1500);
 await set('#book', 'canon-in-d'); await sleep(800);

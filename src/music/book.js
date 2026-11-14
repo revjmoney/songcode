@@ -58,7 +58,7 @@ export function bookDroneLine(song, length) {
 
 // MIDI: one beat = one second (60 bpm), so the tempo map is baked into the note times
 export function bookMidi(song) {
-  const n = (v) => voiceNotes(song, v).map((x) => ({ t: x.t, dur: x.dur, key: x.key, vel: 96 }));
+  const n = (v) => voiceNotes(song, v).map((x) => ({ t: x.t, dur: x.dur, key: x.key, vel: 96, ...(x.slide ? { slide: true } : {}) }));
   return writeMidi([{ name: 'Melody', ch: 0, notes: n('x') }, { name: 'Bass', ch: 1, notes: n('z') }], { bpm: 60, ppq: 960 });
 }
 

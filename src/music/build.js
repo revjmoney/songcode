@@ -105,11 +105,15 @@ export const LATHE_OUT = { axes: ['X', 'Z'], diameter: true, units: 'in', header
 export function songWords(out = {}) {
   const o = { ...LATHE_OUT, ...out };
   const mm = o.units === 'mm', u = mm ? 25.4 : 1;
-  const len = (v) => (mm ? (v * u).toFixed(3) : r4(v));
+  const rot = o.rotaryAxes ?? [false, false];
+  const lenLin = (v) => (mm ? (v * u).toFixed(3) : r4(v));
+  const lenRot = (v) => v.toFixed(3);                                   // degrees, never scaled to mm
+  const lenA = rot[0] ? lenRot : (v) => lenLin(o.diameter ? 2 * v : v);
+  const lenB = rot[1] ? lenRot : lenLin;
   return {
     o,
-    a: (v) => `${o.axes[0]}${len(o.diameter ? 2 * v : v)}`,            // high voice (lathe X, diameter)
-    b: (v) => `${o.axes[1]}${len(v)}`,                                  // low voice
+    a: (v) => `${o.axes[0]}${lenA(v)}`,                                 // high voice (lathe X, diameter)
+    b: (v) => `${o.axes[1]}${lenB(v)}`,                                 // low voice
     f: (ipm, d = 3) => `F${(ipm * u).toFixed(mm ? 2 : d)}`,
     g4: (s, txt) => (o.dwell === 'ms' ? `G4 P${Math.round(s * 1000)}` : `G4 P${txt ?? r3(s)}`),
     n: (k) => (o.numbers ? `N${k} ` : ''),
@@ -119,6 +123,7 @@ export function songWords(out = {}) {
 export function buildSong(x, z, m, { boxX = 0.6, boxZ = 0.5, tempo = 1, dolphin = false, drone = null, title = 'song', legato = true, out } = {}) {
   const warnings = [];
   const W = songWords(out);
+  if (W.o.rotary?.enabled) return buildSongRotary(x, z, m, { boxX, boxZ, tempo, title, legato, W, warnings });
   const sx = x.map((n) => ({ ...n, t: n.t / tempo, dur: n.dur / tempo }));
   const sz = z.map((n) => ({ ...n, t: n.t / tempo, dur: n.dur / tempo }));
   const marks = [...new Set([0, ...sx.flatMap((n) => [n.t, n.t + n.dur]), ...sz.flatMap((n) => [n.t, n.t + n.dur])].map((v) => Math.round(v * 1e4) / 1e4))].sort((a, b) => a - b);
@@ -176,6 +181,87 @@ export function buildSong(x, z, m, { boxX = 0.6, boxZ = 0.5, tempo = 1, dolphin 
     if (nz && nz.hz / m.hz.Z > m.max.Z) warnings.push(`${W.o.axes[1]} note ${Math.round(nz.hz)} Hz is above the ${W.o.axes[1]} max rate`);
   }
   if (Math.abs(px) > 1e-6 || Math.abs(pz) > 1e-6) L.push(`G1 ${[Math.abs(px) > 1e-6 ? W.a(-px) : '', Math.abs(pz) > 1e-6 ? W.b(-pz) : ''].filter(Boolean).join(' ')} ${W.f(10, 0)}`);
+  L.push('G90');
+  if (W.o.end) L.push(W.o.end);
+  return { lines: L, warnings: [...new Set(warnings)], seconds, moves };
+}
+
+
+// Opt-in rotary feed math for a mill A/B/C voice. Linear-only programs never enter here.
+// Conventions: g93 = inverse time (F = 60/t_s, recommended for mixed linear+rotary);
+// deg = G94 deg/min on a rotary-only move (mixed moves still use G93);
+// radius = G94 path feed = hypot(linear, ω·radius) in the program units.
+function buildSongRotary(x, z, m, { boxX, boxZ, tempo, title, legato, W, warnings }) {
+  const sx = x.map((n) => ({ ...n, t: n.t / tempo, dur: n.dur / tempo }));
+  const sz = z.map((n) => ({ ...n, t: n.t / tempo, dur: n.dur / tempo }));
+  const marks = [...new Set([0, ...sx.flatMap((n) => [n.t, n.t + n.dur]), ...sz.flatMap((n) => [n.t, n.t + n.dur])].map((v) => Math.round(v * 1e4) / 1e4))].sort((a, b) => a - b);
+  const at = (list, a, b) => list.find((n) => n.t <= a + 1e-4 && n.t + n.dur >= b - 1e-4);
+  const rot = W.o.rotaryAxes ?? [false, false];
+  const conv = W.o.rotary?.convention ?? 'g93';
+  const radius = W.o.rotary?.radius ?? (W.o.units === 'in' ? 1 : 25);
+  const mm = W.o.units === 'mm';
+  const L = [`(${W.o.tag}: ${title.replace(/[()]/g, '')})`, W.o.header];
+  let px = 0, pz = 0, dx = 1, dz = 1, n = 9000, seconds = 0, moves = 0, usedG93 = /\bG93\b/.test(W.o.header);
+  let lastX = null, lastZ = null;
+  const rampOf = (vI, acc, isRot) => {
+    if (!vI) return 0;
+    const vel = isRot ? vI / 60 : (vI * 25.4) / 60;                    // deg/s or mm/s
+    return vel / Math.max(acc, 1e-9);
+  };
+  const feedWord = (tc, vxI, vzI) => {
+    const hasLin = (!rot[0] && vxI) || (!rot[1] && vzI);
+    const hasRot = (rot[0] && vxI) || (rot[1] && vzI);
+    if (conv === 'g93' || (conv === 'deg' && hasLin && hasRot)) {
+      usedG93 = true;
+      return `F${(60 / Math.max(tc, 1e-6)).toFixed(4)}`;
+    }
+    if (conv === 'deg' && hasRot && !hasLin) {
+      const dpm = (rot[0] ? vxI : 0) + (rot[1] ? vzI : 0);
+      return `F${dpm.toFixed(2)}`;
+    }
+    // radius: path feed in program units (linear units/min + ω·r)
+    const lin = Math.hypot(!rot[0] ? vxI * (mm ? 25.4 : 1) : 0, !rot[1] ? vzI * (mm ? 25.4 : 1) : 0);
+    const tan = ((rot[0] ? vxI : 0) + (rot[1] ? vzI : 0)) * (Math.PI / 180) * radius;
+    const F = Math.hypot(lin, tan);
+    return `F${F.toFixed(mm ? 2 : 3)}`;
+  };
+  for (let k = 0; k < marks.length - 1; k++) {
+    const a = marks[k], b = marks[k + 1], d = b - a;
+    if (d < 1e-3) continue;
+    const nx = at(sx, a, b), nz = at(sz, a, b);
+    if (!nx && !nz) { L.push(`${W.n(n)}${W.g4(d)}`); seconds += d; lastX = lastZ = null; n++; continue; }
+    const vxI = nx ? Math.min(nx.hz / m.hz.X, m.max.X) : 0, vzI = nz ? Math.min(nz.hz / m.hz.Z, m.max.Z) : 0;
+    const newX = nx && nx !== lastX, newZ = nz && nz !== lastZ;
+    const sameX = newX && lastX && Math.abs(lastX.hz - nx.hz) < 0.5, sameZ = newZ && lastZ && Math.abs(lastZ.hz - nz.hz) < 0.5;
+    const flipX = newX && (!legato || sameX), flipZ = newZ && (!legato || sameZ);
+    if (flipX) dx = -dx;
+    if (flipZ) dz = -dz;
+    const fromStop = flipX || flipZ || (!lastX && !lastZ);
+    const ramp = Math.max(rampOf(vxI, m.acc.X, rot[0]), rampOf(vzI, m.acc.Z, rot[1]));
+    let tc = fromStop ? Math.max(d - ramp, d * 0.4) : d;
+    let lx = (vxI * tc) / 60, lz = (vzI * tc) / 60;
+    const parts = Math.max(1, Math.ceil(Math.max(lx / boxX, lz / boxZ) - 1e-9));
+    if (parts > 1) { tc = Math.max(d - parts * ramp, d * 0.4); lx = (vxI * tc) / 60; lz = (vzI * tc) / 60; }
+    const hasLin = (!rot[0] && vxI) || (!rot[1] && vzI);
+    const hasRot = (rot[0] && vxI) || (rot[1] && vzI);
+    const mixedDeg = conv === 'deg' && hasLin && hasRot;
+    for (let p = 0; p < parts; p++) {
+      const sxl = lx / parts, szl = lz / parts;
+      if (sxl && Math.abs(px + dx * sxl) > boxX) dx = -dx;
+      if (szl && Math.abs(pz + dz * szl) > boxZ) dz = -dz;
+      px += sxl ? dx * sxl : 0; pz += szl ? dz * szl : 0;
+      const w = [sxl ? W.a(dx * sxl) : '', szl ? W.b(dz * szl) : ''].filter(Boolean).join(' ');
+      const pre = mixedDeg ? 'G93 ' : '';
+      L.push(`${W.n(n)}${pre}G1 ${w} ${feedWord(tc / parts, vxI, vzI)}`); moves++;
+      if (mixedDeg) L.push('G94');
+      if (p < parts - 1) { if (sxl) dx = -dx; if (szl) dz = -dz; }
+    }
+    seconds += d; lastX = nx ?? null; lastZ = nz ?? null; n++;
+    if (nx && nx.hz / m.hz.X > m.max.X) warnings.push(`${W.o.axes[0]} note ${Math.round(nx.hz)} Hz is above the ${W.o.axes[0]} max rate`);
+    if (nz && nz.hz / m.hz.Z > m.max.Z) warnings.push(`${W.o.axes[1]} note ${Math.round(nz.hz)} Hz is above the ${W.o.axes[1]} max rate`);
+  }
+  if (Math.abs(px) > 1e-6 || Math.abs(pz) > 1e-6) L.push(`G1 ${[Math.abs(px) > 1e-6 ? W.a(-px) : '', Math.abs(pz) > 1e-6 ? W.b(-pz) : ''].filter(Boolean).join(' ')} ${W.f(10, 0)}`);
+  if (usedG93 && !/\bG94\b/.test(W.o.header)) L.push('G94');
   L.push('G90');
   if (W.o.end) L.push(W.o.end);
   return { lines: L, warnings: [...new Set(warnings)], seconds, moves };
