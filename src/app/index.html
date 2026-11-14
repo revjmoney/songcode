@@ -55,6 +55,10 @@
       <label>Fill gap (s) <input type="number" id="gap" min="0.1" max="5" step="0.1" value="0.6"></label>
     </div>
     <p class="hint" id="songlen"></p>
+    <div id="window-notice" class="notice" hidden>
+      <p>Only <b id="window-range">0:00–1:00</b> of this <b id="window-total"></b> song will be converted.</p>
+      <button type="button" id="window-full">Use the whole song</button>
+    </div>
   </section>
 
   <section id="machine">
@@ -65,6 +69,14 @@
       <label>Units <select id="units"><option value="mm">mm</option><option value="in">inch</option></select></label>
     </div>
     <p class="hint" id="presetnote"></p>
+    <div id="revturn-extras" class="extras" hidden>
+      <label><input type="checkbox" id="trio"> Third voice on C (chuck, spindle stays off)</label>
+      <label id="cpart-wrap" class="cpart" hidden>C plays
+        <select id="cpart"><option value="">Choose a part or the book drone…</option></select>
+      </label>
+      <label id="drum-opt" hidden><input type="checkbox" id="drums"> Play drums on Z (kicks and snares under the melody; bass is left out)</label>
+      <p class="hint">These are off by default, so a two-axis program stays the usual X+Z output. The chuck voice uses the measured C-axis rates; drums use short Z strokes already in the engine.</p>
+    </div>
     <table class="axes">
       <thead><tr><th></th><th>Axis</th><th>Steps/mm</th><th>Microsteps</th><th>Max mm/min</th><th>Accel mm/s²</th><th>Travel ± <span class="u">mm</span></th></tr></thead>
       <tbody>
@@ -94,7 +106,7 @@
       <button type="button" id="download" class="go">⬇ DOWNLOAD .nc</button>
       <button type="button" id="copy">COPY</button>
     </div>
-    <p class="hint">LISTEN plays the two motor lines as tones at the pitch your machine will sing them. The program moves relative to wherever the tool is, stays inside the travel box, and ends where it started. Jog to a clear spot, keep hands off, and be ready to hit feed hold.</p>
+    <p class="hint" id="listen-hint">LISTEN plays the motor lines as tones, with each axis ramping at your accel setting, so a slow motor (REVTURN Z at 12 mm/s²) takes time to reach pitch, as it does on the machine. The program moves relative to wherever the tool is, stays inside the travel box, and ends where it started. Jog to a clear spot, keep hands off, and be ready to hit feed hold.</p>
     <pre id="code"></pre>
   </section>
 </main>

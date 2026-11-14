@@ -6,8 +6,8 @@
 // ({ name: [{ t, dur, key }] } in seconds) -> two one-note-at-a-time lines. High voice = the lead line (vocals), and
 // wherever it rests for more than `gap` s the fill track's top line plays instead (the riff); low voice = the bass.
 // Then machine profiles for any stepper machine and the program framing (start / end code).
-import { monoLine, fitVoice, mergeShort } from './voices.js';
-import { rangeOf, buildSong, LATHE_OUT, netTravel } from './build.js';
+import { monoLine, fitVoice, mergeShort, expandSlides } from './voices.js';
+import { rangeOf, buildSong, buildTrio, zDrumNotes, LATHE_OUT, netTravel } from './build.js';
 
 const VOCAL = /vo[xc]|vocal|voice|voix|sing|lead|melod|solo/i;
 
@@ -62,6 +62,8 @@ export const PRESETS = {
     flavor: 'grbl', units: 'in', diameter: true, g7: true, numbers: true, tag: 'REVTURN music',
     a: { axis: 'X', steps: 800, micro: 16, max: 1016, accel: 50, box: 0.65 },
     b: { axis: 'Z', steps: 1932, micro: 32, max: 558.8, accel: 12, box: 0.4 },
+    // C (chuck): $103 steps/deg, $113 deg/min, $123 deg/s2. Used only when the third-voice option is on.
+    c: { axis: 'C', steps: 13.333, micro: 8, max: 99000, accel: 3000 },
     start: 'G1 Z-1.375 F20\nG0 X0', end: 'G1 Z-0.25 F20\nG0 X0',
   },
   'grbl mill / router (X + Y)': {
@@ -89,10 +91,14 @@ export const PRESETS = {
 
 // profile -> the machine object buildSong uses (internally inches: Hz per ipm, max ipm, accel mm/s2)
 export function machineOf(p) {
-  const hz = (ax) => (25.4 / 60) * (ax.steps / ax.micro);
+  const hzLin = (ax) => (25.4 / 60) * (ax.steps / ax.micro);
+  // C is rotary: $103 is steps/deg, so Hz per rpm = (steps/deg * 360) / micro / 60
+  const hzC = p.c ? (p.c.steps * 360) / p.c.micro / 60 : 1;
   return {
-    hz: { X: hz(p.a), Z: hz(p.b), C: 1 }, max: { X: p.a.max / 25.4, Z: p.b.max / 25.4, C: 0 },
-    acc: { X: p.a.accel, Z: p.b.accel, C: 0 }, micro: { x: p.a.micro, z: p.b.micro },
+    hz: { X: hzLin(p.a), Z: hzLin(p.b), C: hzC },
+    max: { X: p.a.max / 25.4, Z: p.b.max / 25.4, C: p.c ? p.c.max / 360 : 0 },
+    acc: { X: p.a.accel, Z: p.b.accel, C: p.c?.accel ?? 0 },
+    micro: { x: p.a.micro, z: p.b.micro, c: p.c?.micro ?? 8 },
   };
 }
 
@@ -110,30 +116,68 @@ export function outOf(p) {
 
 // start / end code: the header turns absolute (G90) for the start lines, then back to relative for the song;
 // the end lines go after the song's own G90. Same as gen-gp-song.mjs always did for the lathe.
-export function frame(lines, { start = '', end = '' } = {}) {
+export function frame(lines, { start = '', end = '' } = {}, { wrapInch = false } = {}) {
   const L = lines.slice();
   const s = String(start).split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
   const e = String(end).split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-  if (s.length) L.splice(1, 1, L[1].replace('G91', 'G90'), ...s, 'G91');
-  if (e.length) { const i = L.lastIndexOf('G90'); L.splice(i + 1, 0, ...e); }
+  const inch = (block) => (wrapInch ? ['G20', ...block] : block);
+  if (s.length) {
+    const i = L.findIndex((l) => /\bG91\b/.test(l));
+    if (i >= 0) L.splice(i, 1, L[i].replace(/\bG91\b/, 'G90'), ...inch(s), wrapInch ? 'G21 G91' : 'G91');
+    else L.splice(1, 0, ...(wrapInch ? ['G20'] : []), 'G90', ...s, wrapInch ? 'G21 G91' : 'G91');
+  }
+  if (e.length) {
+    const i = L.findLastIndex((l) => /\bG90\b/.test(l));
+    L.splice(i >= 0 ? i + 1 : L.length, 0, ...inch(e));
+  }
   return L;
 }
 
 const inch = (p, v) => (p.units === 'mm' ? v / 25.4 : v);
 
-// everything at once: tracks + picks + profile -> { text, lines, seconds, warnings, travel, high, low, shift }
-export function songcode(tracks, picks, profile, { title = 'song', tempo = 1, transpose = 0, mergeLow = 0.12, legato = true } = {}) {
+// everything at once: tracks + picks + profile -> program.
+// slides (default on): ~ notes become a pitch ramp in the g-code.
+// trio / drums are opt-in and off by default, so two-axis output stays the same except for the new slides.
+export function songcode(tracks, picks, profile, {
+  title = 'song', tempo = 1, transpose = 0, mergeLow = 0.12, legato = true,
+  slides = true, trio = false, drums = null, cLine = null,
+} = {}) {
   const { high, low } = arrange(tracks, picks);
   const m = machineOf(profile);
   const [al, ah] = rangeOf(m, 'X'), [bl, bh] = rangeOf(m, 'Z');
   const A = fitVoice(high, al, ah, transpose), B = fitVoice(low, bl, bh, transpose);
-  const lowNotes = mergeLow ? mergeShort(B.notes, mergeLow) : B.notes;
+  let highNotes = slides ? expandSlides(A.notes) : A.notes;
+  let lowNotes = mergeLow ? mergeShort(B.notes, mergeLow) : B.notes;
+  if (slides) lowNotes = expandSlides(lowNotes);
+  const drumHits = (drums ?? []).filter((d) => d.piece === 'K' || d.piece === 'S');
+  const usedDrums = !trio && drumHits.length > 0;
+  if (usedDrums) lowNotes = zDrumNotes(drumHits, m).map((n) => ({ ...n, key: 69 + 12 * Math.log2(Math.max(n.hz, 1) / 440) }));
   const out = outOf(profile);
-  const song = buildSong(A.notes, lowNotes, m, { title, tempo, legato, dolphin: false, boxX: inch(profile, profile.a.box), boxZ: inch(profile, profile.b.box), out });
-  const lines = frame(song.lines, profile);
-  const travel = netTravel(song.lines, out);
+  const box = { boxX: inch(profile, profile.a.box), boxZ: inch(profile, profile.b.box) };
+  let song, lines, travel, C = { notes: [], shift: 0, folded: 0 };
+  if (trio && cLine?.length && m.max.C > 0) {
+    const [cl, ch] = rangeOf(m, 'C');
+    C = fitVoice(cLine, cl, ch, transpose);
+    const cNotes = slides ? expandSlides(C.notes) : C.notes;
+    song = buildTrio(highNotes, lowNotes, cNotes, m, { title, tempo, legato, ...box });
+    // trio programs are written in mm; REVTURN start/end code is in inches
+    lines = frame(song.lines, profile, { wrapInch: profile.units === 'in' });
+    travel = netTravel(song.lines, { axes: ['X', 'Z'], diameter: true, units: 'mm' });
+    // netTravel of mm diameter words: convert to profile units (inches) for the UI
+    if (profile.units !== 'mm') {
+      const k = 1 / 25.4;
+      travel = { x: travel.x * k, z: travel.z * k, maxX: travel.maxX * k, maxZ: travel.maxZ * k };
+    }
+  } else {
+    song = buildSong(highNotes, lowNotes, m, { title, tempo, legato, dolphin: false, ...box, out });
+    lines = frame(song.lines, profile);
+    travel = netTravel(song.lines, out);
+  }
   return {
     lines, text: lines.join('\n') + '\n', seconds: song.seconds, warnings: song.warnings, travel, out,
-    high: A.notes, low: lowNotes, shift: { a: A.shift, b: B.shift }, folded: { a: A.folded, b: B.folded },
+    high: highNotes, low: lowNotes, c: C.notes, shift: { a: A.shift, b: B.shift, c: C.shift },
+    folded: { a: A.folded, b: B.folded, c: C.folded },
+    slides: (slides ? highNotes.filter((n) => n.slide).length + lowNotes.filter((n) => n.slide).length : 0),
+    trio: !!(trio && cLine?.length && m.max.C > 0), usedDrums, machine: m, legato,
   };
 }

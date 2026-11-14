@@ -65,3 +65,15 @@ pre { max-height: 300px; overflow: auto; background: #0a1118; border: 1px solid 
 footer { color: var(--dim); font-size: 13px; padding-bottom: 30px; }
 footer a { color: var(--blue); }
 @media (max-width: 640px) { .grid label.wide { grid-column: span 1; } h1 { font-size: 26px; } }
+
+.notice { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--amber); background: #2a1c08; border-radius: 8px; color: var(--amber); }
+.notice[hidden] { display: none; }
+.notice p { margin: 0; flex: 1 1 240px; }
+.notice button { background: var(--amber); color: #1a1000; border-color: var(--amber); }
+.extras { margin: 10px 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; display: flex; flex-direction: column; gap: 8px; }
+.extras[hidden] { display: none; }
+.extras label { color: var(--dim); font-size: 14px; }
+.extras .cpart { display: flex; gap: 8px; align-items: center; }
+.extras .cpart[hidden] { display: none; }
+.extras .cpart select { width: auto; min-width: 220px; }
+#drum-opt[hidden] { display: none; }

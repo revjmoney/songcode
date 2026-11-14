@@ -37,9 +37,9 @@ export function monoLine(notes, pick = 'high') {
     const n = live.reduce((m, x) => (pick === 'high' ? (x.key > m.key ? x : m) : x.key < m.key ? x : m));
     const prev = out[out.length - 1];
     if (prev && prev.src === n && Math.abs(prev.t + prev.dur - a) < 1e-6) prev.dur += b2 - a;
-    else out.push({ t: a, dur: b2 - a, key: n.key, src: n });
+    else out.push({ t: a, dur: b2 - a, key: n.key, src: n, slide: !!n.slide });
   }
-  return out.map(({ t, dur, key }) => ({ t, dur, key }));
+  return out.map(({ t, dur, key, slide }) => ({ t, dur, key, ...(slide ? { slide: true } : {}) }));
 }
 
 // shift a voice by whole octaves so most notes fit [loHz, hiHz]; notes still outside fold in by octaves and are
@@ -59,7 +59,7 @@ export function fitVoice(line, loHz, hiHz, transpose = 0) {
     while (f < loHz && f * 2 <= hiHz) { key += 12; f *= 2; fold = true; }
     const out = f > hiHz * 1.0001 || f < loHz * 0.9999;
     if (fold) folded++;
-    return { t: n.t, dur: n.dur, key, hz: f, folded: fold, outside: out };
+    return { t: n.t, dur: n.dur, key, hz: f, folded: fold, outside: out, ...(n.slide ? { slide: true } : {}) };
   });
   return { notes, shift, folded };
 }
@@ -69,8 +69,10 @@ export function mergeShort(notes, minDur) {
   const out = [];
   for (const n of notes) {
     const prev = out[out.length - 1];
-    if (prev && n.dur < minDur && Math.abs(prev.t + prev.dur - n.t) < 0.02) prev.dur = n.t + n.dur - prev.t;
-    else out.push({ ...n });
+    if (prev && n.dur < minDur && Math.abs(prev.t + prev.dur - n.t) < 0.02) {
+      prev.dur = n.t + n.dur - prev.t;
+      if (n.slide) prev.slide = true;
+    } else out.push({ ...n });
   }
   return out;
 }
@@ -96,4 +98,33 @@ export function drumsToGrid(notes, bpm, maxSteps = 16) {
     if (piece && s < maxSteps) grid[piece][s] = true;
   }
   return grid;
+}
+
+// A note with `slide: true` glides into the next note: split it into short steps whose pitch
+// (MIDI key, so log frequency) walks from this note to the next. The next note still holds its
+// own pitch when it arrives. Used so SONGCODE g-code matches the REVTURN screen's ~ bends.
+export function expandSlides(notes, { minStep = 0.04 } = {}) {
+  if (!notes?.length) return notes ?? [];
+  const out = [];
+  for (let i = 0; i < notes.length; i++) {
+    const n = notes[i], next = notes[i + 1];
+    const connected = next && (next.t - (n.t + n.dur) < 0.05);
+    if (!n.slide || !connected) { out.push({ ...n }); continue; }
+    const steps = Math.max(3, Math.min(16, Math.round(n.dur / minStep)));
+    for (let s = 0; s < steps; s++) {
+      const frac = s / (steps - 1);
+      const key = n.key + (next.key - n.key) * frac;
+      const hz = hzOf(key);
+      out.push({
+        t: n.t + (n.dur * s) / steps,
+        dur: n.dur / steps,
+        key,
+        hz,
+        folded: n.folded,
+        outside: n.outside,
+        slide: true,
+      });
+    }
+  }
+  return out;
 }
