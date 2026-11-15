@@ -1,3 +1,37 @@
+# SONGCODE 0.4.0 — `cos/next-steps` (local only, 2026-11-14)
+
+Jason asked for the last two issue drafts (004 and 005), still on this local branch. PR #1 is already up; this commit is local only — do not push.
+
+## 4. LISTEN matches the motion planner
+
+- LISTEN now runs a grbl / grblHAL-style planner on the generated program: trapezoid accel/decel per block, junction-deviation cornering, lookahead across blocks, and per-axis max rate and accel.
+- Junction deviation comes from the preset (grbl / REVTURN `$11` = 0.01 mm, Marlin 0.013 mm, LinuxCNC 0.05 mm as a blending stand-in) and can be edited in the machine form. It only affects the preview, not the written g-code.
+- The preview's timing and pitch follow the planned axis velocities (including decel into a corner and a cruise through a straight junction).
+- Moves that never reach the programmed feed (a short block or a tight corner) are listed in the warnings.
+- Hand-computed tests cover the triangle/trapezoid, a 90° junction, a straight junction vs a reversal, lookahead, and per-axis accel on a diagonal.
+
+## 5. Non-GM drum maps and SMPTE timing
+
+- MIDI files with SMPTE time division (negative division, fps and ticks-per-frame) are read instead of rejected. The 29 fps code is 29.97 drop-frame (30/1.001). Tempo meta events do not change SMPTE wall-clock ticks.
+- Drum parts that are not on General MIDI channel 10 are detected: Roland GS / Yamaha XG bank MSB (120 / 126 / 127) on any channel, a kit-style track name, and Guitar Pro percussion staves (already collected).
+- The parts table has a **DRUMS** toggle and a GM / GS / XG drum-map, so a user can send a non-GM kit to `song.drums` and map the note numbers to kick / snare / hat / tom.
+- Synthetic fixtures cover SMPTE 25 fps and 29.97 drop-frame, a GS bank on channel 4, and moving a track between pitched and drums under the GS map.
+
+## Tests, version, drafts
+
+- 52 tests. `npm test` and `npm run build` pass.
+- Version is 0.4.0. Issue drafts 004 and 005 are marked done in `docs/issues/`. Still not filed on GitHub.
+
+## Compatibility
+
+Default two-axis output for book songs is **byte-identical** to 0.3.0 (shipped `.nc` unchanged). The planner and the drum-map UI do not write into `songcode().text`.
+
+## Not done, and why
+
+- No push (Jason will handle PR #1), no Pages deploy, no GitHub issues.
+
+---
+
 # SONGCODE 0.3.0 — `cos/next-steps` (local only, 2026-11-14)
 
 Jason asked for the three leftover drafts from 0.2.0, still on this local branch only: no push, no PR, no deploy, and the write-ups in `docs/issues/` were not filed on GitHub.

@@ -347,3 +347,200 @@ describe('rotary feed math', () => {
     expect(m.text).not.toMatch(/^N\d/m);
   });
 });
+
+
+import { junctionMaxSpeed, trapezoid, planBlocks, planProgram, junctionDeviationOf } from '../src/music/planner.js';
+import { parseDivision, smpteDivision, parseMidi } from '../src/music/midi.js';
+import { applyDrumMap, markTrackAsDrums, markTrackAsPitched, isAutoDrumTrack, notesToDrums } from '../src/music/load.js';
+import { mapDrum, drumNameGuess } from '../src/music/voices.js';
+import { machineOf } from '../src/music/arrange.js';
+
+describe('motion planner (LISTEN)', () => {
+  it('a short single-axis block is a triangle and never reaches cruise (hand-computed)', () => {
+    // d = 10 mm, a = 50 mm/s², F = 50 mm/s, start and end at rest
+    const p = trapezoid(10, 50, 0, 0, 50);
+    expect(p.kind).toBe('triangle');
+    expect(p.vPeak).toBeCloseTo(Math.sqrt(500), 8);       // v² = a d = 500
+    expect(p.time).toBeCloseTo(2 * Math.sqrt(500) / 50, 8);
+    expect(p.reaches).toBe(false);
+  });
+  it('a long single-axis block is a trapezoid that cruises at F (hand-computed)', () => {
+    // d = 100 mm, a = 50, F = 50 mm/s, rest to rest: accel 25 mm / 1 s, cruise 50 mm / 1 s, decel 25 mm / 1 s
+    const p = trapezoid(100, 50, 0, 0, 50);
+    expect(p.kind).toBe('trapezoid');
+    expect(p.vPeak).toBeCloseTo(50, 8);
+    expect(p.accelDist).toBeCloseTo(25, 8);
+    expect(p.cruiseDist).toBeCloseTo(50, 8);
+    expect(p.decelDist).toBeCloseTo(25, 8);
+    expect(p.time).toBeCloseTo(3, 8);
+    expect(p.reaches).toBe(true);
+  });
+  it('a 90-degree corner uses the grbl junction-deviation formula (hand-computed)', () => {
+    const vj = junctionMaxSpeed({ X: 1, Y: 0 }, { X: 0, Y: 1 }, 50, 0.01);
+    // cos θ_j = 0, sin(θ/2) = √(1/2), v² = (50 · 0.01 · √0.5) / (1 − √0.5)
+    const sinHalf = Math.sqrt(0.5);
+    const expectV = Math.sqrt((50 * 0.01 * sinHalf) / (1 - sinHalf));
+    expect(vj).toBeCloseTo(expectV, 8);
+    expect(vj).toBeCloseTo(1.0986841135, 6);
+  });
+  it('a straight junction does not slow down, a reversal does', () => {
+    expect(junctionMaxSpeed({ X: 1 }, { X: 1 }, 50, 0.01)).toBe(Infinity);
+    expect(junctionMaxSpeed({ X: 1 }, { X: -1 }, 50, 0.01)).toBe(0);
+  });
+  it('lookahead lets two colinear blocks cruise through the junction', () => {
+    const blocks = [
+      { kind: 'move', delta: { X: 80 }, distance: 80, unit: { X: 1 }, accel: 50, vNominal: 50, letters: ['X'] },
+      { kind: 'move', delta: { X: 80 }, distance: 80, unit: { X: 1 }, accel: 50, vNominal: 50, letters: ['X'] },
+    ];
+    const { blocks: out } = planBlocks(blocks, { junctionDeviation: 0.01 });
+    const [a, b] = out.filter((x) => x.kind === 'move');
+    expect(a.profile.reaches).toBe(true);
+    expect(b.profile.reaches).toBe(true);
+    expect(a.vExit).toBeCloseTo(50, 5);
+    expect(b.vEntry).toBeCloseTo(50, 5);
+  });
+  it('per-axis accel limits the path accel on a diagonal (hand-computed)', () => {
+    const p = PRESETS['grbl mill / router (X + Y)'];
+    // override accels: X 50, Y 12 mm/s², a 10+10 mm move
+    const profile = { ...p, a: { ...p.a, accel: 50 }, b: { ...p.b, accel: 12 } };
+    const m = machineOf(profile);
+    const lines = ['(t)', 'G21 G91 G94', 'G1 X10 Y10 F3000', 'G90', 'M30'];
+    const plan = planProgram(lines, { axes: ['X', 'Y'], diameter: false, units: 'mm', header: 'G21 G91 G94' }, m, profile);
+    const b = plan.blocks.find((x) => x.kind === 'move');
+    const u = 10 / Math.hypot(10, 10);                    // 1/√2
+    expect(b.accel).toBeCloseTo(12 / u, 6);                 // Y is the limiter
+  });
+  it('LISTEN planner flags a short block that cannot reach the written feed', () => {
+    const profile = PRESETS['REVTURN lathe'];
+    const m = machineOf(profile);
+    const lines = ['(REVTURN music: t)', 'G20 G7 G91 G94', 'G1 X0.02 F40', 'G90', 'M30'];
+    const plan = planProgram(lines, { axes: ['X', 'Z'], diameter: true, units: 'in', header: 'G20 G7 G91 G94' }, m, profile);
+    expect(plan.missed).toBeGreaterThan(0);
+  });
+  it('preset junction deviation follows the flavour (grbl 0.01, Marlin 0.013, LinuxCNC 0.05)', () => {
+    expect(junctionDeviationOf(PRESETS['grbl mill / router (X + Y)'])).toBe(0.01);
+    expect(junctionDeviationOf(PRESETS['REVTURN lathe'])).toBe(0.01);
+    expect(junctionDeviationOf(PRESETS['3D printer, Marlin (X + Y)'])).toBe(0.013);
+    expect(junctionDeviationOf(PRESETS['LinuxCNC mill (X + Y)'])).toBe(0.05);
+  });
+  it('planning a book song does not change songcode().text', () => {
+    const twinkle = BOOK.find((s) => s.id === 'twinkle');
+    const r = songcode(bookTracks(twinkle), picks, PRESETS['grbl mill / router (X + Y)'], { title: `${twinkle.title}, ${twinkle.composer}` });
+    expect(r.text).toBe(file('songs/gcode/twinkle-grbl-xy.nc').toString());
+    const plan = planProgram(r.lines, r.out, r.machine, PRESETS['grbl mill / router (X + Y)']);
+    expect(plan.blocks.some((b) => b.kind === 'move')).toBe(true);
+    expect(plan.seconds).toBeGreaterThan(1);
+  });
+});
+
+function smpteFile(fpsCode, tpf, { key = 60, ticks = 40, ch = 0, name = 'Melody', bank = null } = {}) {
+  const div = smpteDivision(fpsCode, tpf);
+  const vlq = (v) => { const out = [v & 0x7f]; while ((v >>= 7)) out.unshift((v & 0x7f) | 0x80); return out; };
+  const chunk = (id, data) => [...id].map((c) => c.charCodeAt(0)).concat([(data.length >>> 24) & 255, (data.length >> 16) & 255, (data.length >> 8) & 255, data.length & 255], data);
+  const ev = [];
+  const nm = [...name].map((c) => c.charCodeAt(0) & 0x7f);
+  ev.push([0, [0xff, 0x03, nm.length, ...nm]]);
+  if (bank != null) ev.push([0, [0xb0 | ch, 0, bank]], [0, [0xb0 | ch, 32, 0]]);
+  ev.push([0, [0x90 | ch, key, 100]]);
+  ev.push([ticks, [0x80 | ch, key, 0]]);
+  const data = []; let last = 0;
+  for (const [tk, bytes] of ev) { data.push(...vlq(tk - last), ...bytes); last = tk; }
+  data.push(0, 0xff, 0x2f, 0);
+  const head = chunk('MThd', [0, 1, 0, 1, (div >> 8) & 255, div & 255]);
+  return new Uint8Array([...head, ...chunk('MTrk', data)]);
+}
+
+describe('SMPTE-timed MIDI', () => {
+  it('parses the 24 / 25 / 29 / 30 fps division codes, and 29 as 29.97 drop-frame', () => {
+    expect(parseDivision(smpteDivision(24, 40))).toMatchObject({ smpte: true, fpsCode: 24, fps: 24, ticksPerFrame: 40, dropFrame: false });
+    expect(parseDivision(smpteDivision(25, 40))).toMatchObject({ smpte: true, fpsCode: 25, fps: 25, dropFrame: false });
+    const d29 = parseDivision(smpteDivision(29, 80));
+    expect(d29.fpsCode).toBe(29);
+    expect(d29.dropFrame).toBe(true);
+    expect(d29.fps).toBeCloseTo(30 / 1.001, 10);
+    expect(parseDivision(smpteDivision(30, 80)).fps).toBe(30);
+    expect(parseDivision(480)).toEqual({ smpte: false, ppq: 480 });
+  });
+  it('converts ticks to seconds at 25 fps, 40 ticks/frame (hand-computed)', () => {
+    // 40 ticks = 1 frame = 1/25 s = 0.04 s
+    const bytes = smpteFile(25, 40, { ticks: 40 });
+    const m = parseMidi(bytes);
+    expect(m.timing.smpte).toBe(true);
+    expect(m.tracks[0].notes[0].dur).toBeCloseTo(0.04, 10);
+    expect(m.length).toBeCloseTo(0.04, 10);
+  });
+  it('uses 29.97 drop-frame (30/1.001) for the 29 fps code (hand-computed)', () => {
+    const tpf = 80;
+    const bytes = smpteFile(29, tpf, { ticks: tpf });       // one frame
+    const m = parseMidi(bytes);
+    expect(m.timing.dropFrame).toBe(true);
+    expect(m.tracks[0].notes[0].dur).toBeCloseTo(1.001 / 30, 10);
+  });
+});
+
+describe('non-GM drum maps', () => {
+  it('GS/XG bank-select on a non-10 channel is treated as a drum part', () => {
+    const bytes = smpteFile(25, 40, { key: 36, ticks: 40, ch: 2, name: 'GS Kit', bank: 127 });
+    // smpteFile works, but also test PPQ writeMidi + hand CC
+    const mid = writeMidi([
+      { name: 'Kit', ch: 3, notes: [{ t: 0, dur: 0.1, key: 36, vel: 100 }, { t: 0.5, dur: 0.1, key: 38, vel: 100 }] },
+      { name: 'Melody', ch: 0, notes: [{ t: 0, dur: 1, key: 60, vel: 100 }] },
+    ]);
+    // inject CC0=120 at the start of the Kit track by building directly
+    const vlq = (v) => { const out = [v & 0x7f]; while ((v >>= 7)) out.unshift((v & 0x7f) | 0x80); return out; };
+    const chunk = (id, data) => [...id].map((c) => c.charCodeAt(0)).concat([(data.length >>> 24) & 255, (data.length >> 16) & 255, (data.length >> 8) & 255, data.length & 255], data);
+    const ev = [
+      [0, [0xff, 0x03, 3, 75, 105, 116]],
+      [0, [0xb0 | 3, 0, 120]],
+      [0, [0xb0 | 3, 32, 0]],
+      [0, [0x90 | 3, 36, 100]],
+      [48, [0x80 | 3, 36, 0]],
+      [240, [0x90 | 3, 38, 100]],
+      [288, [0x80 | 3, 38, 0]],
+    ];
+    const data = []; let last = 0;
+    for (const [tk, bytes] of ev) { data.push(...vlq(tk - last), ...bytes); last = tk; }
+    data.push(0, 0xff, 0x2f, 0);
+    // tempo track + kit
+    const us = Math.round(60e6 / 120);
+    const tempo = [];
+    tempo.push(0, 0xff, 0x51, 3, (us >> 16) & 255, (us >> 8) & 255, us & 255, 0, 0xff, 0x2f, 0);
+    const mid2 = new Uint8Array([
+      ...chunk('MThd', [0, 1, 0, 2, 1, 224]),
+      ...chunk('MTrk', tempo),
+      ...chunk('MTrk', data),
+    ]);
+    const s = loadSong(alphaTab, mid2, 'gs-kit.mid');
+    expect(Object.keys(s.tracks)).toEqual([]);
+    // wait, only Kit track was written — no melody. drums should have K and S.
+    expect(s.drums.map((d) => d.piece).sort()).toEqual(['K', 'S']);
+    expect(Object.keys(s.drumTracks).length).toBe(1);
+  });
+  it('a user can move a pitched track to drums and pick the GS map', () => {
+    const s = {
+      tracks: { 'My Kit': [{ t: 0, dur: 0.1, key: 27 }, { t: 0.5, dur: 0.1, key: 36 }] },
+      drums: [], drumTracks: {}, drumMap: 'GM',
+    };
+    markTrackAsDrums(s, 'My Kit');
+    expect(s.tracks['My Kit']).toBeUndefined();
+    applyDrumMap(s, 'GM');
+    expect(s.drums.map((d) => d.piece)).toEqual(['K']);    // 27 is not on the GM map
+    applyDrumMap(s, 'GS');
+    expect(s.drums.map((d) => d.piece).sort()).toEqual(['K', 'S']); // 27 → S on GS
+    markTrackAsPitched(s, 'My Kit');
+    expect(s.tracks['My Kit'].length).toBe(2);
+    expect(s.drums.length).toBe(0);
+  });
+  it('drumNameGuess accepts kit names and rejects ordinary parts', () => {
+    expect(drumNameGuess('Drum Kit')).toBe(true);
+    expect(drumNameGuess('Percussion')).toBe(true);
+    expect(drumNameGuess('Melody')).toBe(false);
+    expect(isAutoDrumTrack({ channel: 9, name: 'Whatever' })).toBe(true);
+    expect(isAutoDrumTrack({ channel: 0, name: 'Lead', drum: false })).toBe(false);
+  });
+  it('default two-axis output of a book song stays byte-identical', () => {
+    const twinkle = BOOK.find((s) => s.id === 'twinkle');
+    const r = songcode(bookTracks(twinkle), picks, PRESETS['REVTURN lathe'], { title: `${twinkle.title}, ${twinkle.composer}` });
+    expect(r.text).toBe(file('test/fixtures/twinkle-revturn.nc').toString());
+  });
+});

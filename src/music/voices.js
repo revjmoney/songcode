@@ -80,15 +80,33 @@ export function mergeShort(notes, minDur) {
   return out;
 }
 
-// General MIDI drum keys -> REVTURN kit pieces (K kick, S snare, H hat, O open hat, T floor tom, U high tom)
-export function gmDrum(key) {
-  if (key === 35 || key === 36) return 'K';
-  if (key === 37 || key === 38 || key === 39 || key === 40) return 'S';
-  if (key === 42 || key === 44) return 'H';
-  if (key === 46 || key === 49 || key === 51 || key === 52 || key === 55 || key === 57 || key === 59) return 'O';
-  if (key === 41 || key === 43 || key === 45) return 'T';
-  if (key === 47 || key === 48 || key === 50) return 'U';
-  return null;
+// Drum-map keys -> REVTURN kit pieces (K kick, S snare, H hat, O open hat, T floor tom, U high tom).
+// GM is the General MIDI percussion map on channel 10. GS (Roland) and XG (Yamaha) kits keep those
+// note numbers and add a few aliases used on non-channel-10 drum parts.
+const GM_DRUM = {
+  35: 'K', 36: 'K',
+  37: 'S', 38: 'S', 39: 'S', 40: 'S',
+  42: 'H', 44: 'H',
+  46: 'O', 49: 'O', 51: 'O', 52: 'O', 55: 'O', 57: 'O', 59: 'O',
+  41: 'T', 43: 'T', 45: 'T',
+  47: 'U', 48: 'U', 50: 'U',
+};
+export const DRUM_MAPS = {
+  GM: { ...GM_DRUM },
+  GS: { ...GM_DRUM, 27: 'S', 28: 'S', 29: 'S', 31: 'S', 32: 'S', 33: 'T', 34: 'T' },
+  XG: { ...GM_DRUM, 25: 'S', 26: 'S', 27: 'S', 31: 'S', 32: 'T', 34: 'T' },
+};
+export const DRUM_MAP_NAMES = Object.keys(DRUM_MAPS);
+export function mapDrum(key, map = 'GM') {
+  const table = DRUM_MAPS[map] ?? DRUM_MAPS.GM;
+  return table[key] ?? null;
+}
+export function gmDrum(key) { return mapDrum(key, 'GM'); }
+
+// Bank MSB values that put a MIDI channel in a drum kit (Roland GS / Yamaha XG / similar).
+export function isDrumBank(msb) { return msb === 120 || msb === 126 || msb === 127; }
+export function drumNameGuess(name) {
+  return /\b(drums?|percussion|drumkit|drum\s*kit)\b/i.test(String(name ?? ''));
 }
 
 // quantize a MIDI drum track to a grid of 8th notes: rows K,S,H,O,T,U x steps (true/false), up to maxSteps

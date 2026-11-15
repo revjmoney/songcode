@@ -5,13 +5,13 @@
 // The SONGCODE page: open a tab or MIDI file, pick the parts, set up the machine, download the g-code.
 // Everything runs in the browser; nothing is uploaded anywhere.
 import * as alphaTab from '@coderline/alphatab';
-import { loadSong } from '../music/load.js';
+import { loadSong, applyDrumMap, markTrackAsDrums, markTrackAsPitched } from '../music/load.js';
 import { bookTracks, bookLength, bookDroneLine } from '../music/book.js';
 import { BOOK } from '../../songs/book.js';
 import { noteName } from '../music/voices.js';
 import { autoPick, monoOf, PRESETS, songcode, isRotaryLetter, downloadText } from '../music/arrange.js';
 import { drawPath2D, drawPath3D } from '../music/path.js';
-import { scheduleVoice, isPartialWindow, listenEnvelope, missedPitches } from '../music/listen.js';
+import { scheduleVoice, isPartialWindow, listenPlan, schedulePlan } from '../music/listen.js';
 import { startRain } from './rain.js';
 
 const $ = (id) => document.getElementById(id);
@@ -28,6 +28,8 @@ function setProfile(p) {
   $('flavor').value = p.flavor; $('units').value = p.units;
   $('diameter').checked = !!p.diameter; $('g7').checked = !!p.g7; $('numbers').checked = p.numbers !== false;
   $('start').value = p.start ?? ''; $('end').value = p.end ?? '';
+  const jd = p.junctionDeviation ?? (p.flavor === 'marlin' ? 0.013 : p.flavor === 'linuxcnc' ? 0.05 : 0.01);
+  if ($('junction')) $('junction').value = jd;
   for (const v of ['a', 'b']) for (const el of document.querySelectorAll(`.axes tr[data-v=${v}] [data-k]`)) el.value = p[v][el.dataset.k];
   $('presetnote').textContent = p.note ?? '';
   unitLabel();
@@ -39,6 +41,7 @@ function getProfile() {
   return {
     flavor: $('flavor').value, units: $('units').value, diameter: $('diameter').checked, g7: $('g7').checked, numbers: $('numbers').checked,
     a: ax('a'), b: ax('b'), c: base.c, start: $('start').value, end: $('end').value, tag: base.tag,
+    junctionDeviation: Number($('junction')?.value) || undefined,
   };
 }
 function unitLabel() {
@@ -82,7 +85,7 @@ function loadProfile() {
 }
 presetSel.addEventListener('change', () => { if (PRESETS[presetSel.value]) setProfile(PRESETS[presetSel.value]); update(); });
 $('machine').addEventListener('input', (e) => {
-  const extra = e.target && ['trio', 'drums', 'cpart', 'rotary', 'rotary-conv', 'rotary-radius', 'path-2d', 'path-3d'].includes(e.target.id);
+  const extra = e.target && ['trio', 'drums', 'cpart', 'rotary', 'rotary-conv', 'rotary-radius', 'path-2d', 'path-3d', 'junction', 'drum-map'].includes(e.target.id);
   if (e.target !== presetSel && !extra) { if (presetSel.value !== 'Custom') presetSel.value = 'Custom'; $('presetnote').textContent = ''; }
   unitLabel(); showExtras(); update();
 });
@@ -92,7 +95,7 @@ function showExtras() {
   const on = isRevturn();
   $('revturn-extras').hidden = !on;
   $('cpart-wrap').hidden = !on || !$('trio').checked;
-  const hasDrums = (song?.drums?.length ?? 0) > 0;
+  const hasDrums = (song?.drums?.length ?? 0) > 0 || Object.keys(song?.drumTracks ?? {}).length > 0;
   $('drum-opt').hidden = !on || !hasDrums;
   if (!on) { $('trio').checked = false; $('drums').checked = false; }
   fillCPart();
@@ -138,7 +141,7 @@ function open(bytes, name) {
   try {
     song = loadSong(alphaTab, bytes, name);
     if (!Object.keys(song.tracks).length) throw new Error('no notes found (only drums?)');
-    song.drums = song.drums ?? [];
+    song.drums = song.drums ?? []; song.drumTracks = song.drumTracks ?? {}; song.drumMap = song.drumMap ?? 'GM';
   } catch (e) {
     song = null;
     $('songinfo').className = 'info err'; $('songinfo').textContent = `Could not read ${name}: ${e.message ?? e}`;
@@ -161,7 +164,7 @@ $('book').addEventListener('change', () => {
   if (!s) return;
   stop();
   const tracks = bookTracks(s);
-  song = { title: s.title, artist: s.composer, kind: 'SONGCODE book', tracks, drums: [], length: bookLength(s), drone: s.drone, book: s };
+  song = { title: s.title, artist: s.composer, kind: 'SONGCODE book', tracks, drums: [], drumTracks: {}, drumMap: 'GM', length: bookLength(s), drone: s.drone, book: s };
   afterOpen({ full: true });
   setSongInfo();
 });
@@ -173,21 +176,47 @@ $('window-full').addEventListener('click', () => {
 });
 
 // ---------- tracks ----------
+function allParts() {
+  const pitched = Object.entries(song.tracks ?? {}).map(([name, ns]) => ({ name, ns, drum: false }));
+  const drums = Object.entries(song.drumTracks ?? {}).map(([name, ns]) => ({ name, ns, drum: true }));
+  return [...pitched, ...drums];
+}
+function syncDrumMapUi() {
+  const row = $('drum-map-row');
+  if (!row) return;
+  row.hidden = !song;
+  if (song?.drumMap && $('drum-map')) $('drum-map').value = song.drumMap;
+}
 function drawTracks() {
-  const rows = Object.entries(song.tracks).map(([name, ns]) => {
+  const rows = allParts().map(({ name, ns, drum }) => {
     const keys = ns.map((n) => n.key), lo = Math.min(...keys), hi = Math.max(...keys);
     const b = (r, label, cls) => `<button type="button" class="${cls}${roles[r] === name ? ' on' : ''}" data-r="${r}" data-t="${esc(name)}">${label}</button>`;
-    return `<tr><td class="name">${esc(name)}</td><td>${ns.length}</td><td>${noteName(lo)} to ${noteName(hi)}</td><td>${Math.round(monoOf(ns) * 100)}%</td>
-      <td class="roles">${b('lead', 'MELODY', 'mel')} ${b('fill', 'FILL', 'fill')} ${b('bass', 'BASS', 'bass')}</td></tr>`;
+    const drumBtn = `<button type="button" class="drums${drum ? ' on' : ''}" data-r="drums" data-t="${esc(name)}">DRUMS</button>`;
+    const rolesCell = drum ? drumBtn : `${b('lead', 'MELODY', 'mel')} ${b('fill', 'FILL', 'fill')} ${b('bass', 'BASS', 'bass')} ${drumBtn}`;
+    return `<tr><td class="name">${esc(name)}</td><td>${ns.length}</td><td>${noteName(lo)} to ${noteName(hi)}</td><td>${drum ? 'drums' : `${Math.round(monoOf(ns) * 100)}%`}</td>
+      <td class="roles">${rolesCell}</td></tr>`;
   });
   $('tracktable').innerHTML = `<thead><tr><th>Part</th><th>Notes</th><th>Range</th><th>Single notes</th><th>Use as</th></tr></thead><tbody>${rows.join('')}</tbody>`;
+  syncDrumMapUi();
 }
 $('tracktable').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-r]'); if (!b) return;
   const r = b.dataset.r, t = b.dataset.t;
+  if (r === 'drums') {
+    if (song.drumTracks?.[t]) markTrackAsPitched(song, t);
+    else markTrackAsDrums(song, t);
+    for (const k of Object.keys(roles)) if (roles[k] === t) roles[k] = null;
+    showExtras(); drawTracks(); update();
+    return;
+  }
   roles[r] = roles[r] === t ? null : t;
   for (const k of Object.keys(roles)) if (k !== r && roles[k] === t) roles[k] = null;  // one job per part
   drawTracks(); update();
+});
+if ($('drum-map')) $('drum-map').addEventListener('change', () => {
+  if (!song) return;
+  applyDrumMap(song, $('drum-map').value);
+  showExtras(); update();
 });
 
 // ---------- build ----------
@@ -257,13 +286,9 @@ function rebuild() {
   if (trio && !result.trio) w.push('Pick a part for C, or a book drone, to write the third voice.');
   if (result.rotary) w.push(`Rotary feed math is on (${$('rotary-conv').value}): A/B/C uses steps/deg and inverse-time or deg/min feed, not linear hypot.`);
   if (result.path?.overtravel?.length) w.push(...result.path.overtravel.map((x) => `Overtravel: ${x}`));
-  const m = result.machine;
-  if (m) {
-    const envX = listenEnvelope(result.high, { hzPerIpm: m.hz.X, accelMmS2: m.acc.X, legato: result.legato });
-    const envZ = listenEnvelope(result.low, { hzPerIpm: m.hz.Z, accelMmS2: m.acc.Z, legato: result.legato });
-    const missed = missedPitches(envX) + missedPitches(envZ);
-    if (missed) w.push(`LISTEN / the machine: ${missed} note(s) are shorter than the accel ramp, so they will not quite reach pitch.`);
-  }
+  const plan = listenPlan(result, p);
+  result.plan = plan;
+  if (plan?.missed) w.push(`LISTEN / the planner: ${plan.missed} move(s) never reach the programmed feed (a short block or a tight corner cuts the trapezoid short).`);
   $('warn').innerHTML = w.map((x) => `<div>${esc(x)}</div>`).join('');
   const shown = result.lines.length > 400 ? [...result.lines.slice(0, 400), `... ${result.lines.length - 400} more lines in the download`] : result.lines;
   $('code').textContent = shown.join('\n');
@@ -320,16 +345,30 @@ $('listen').addEventListener('click', () => {
   if (!result) return;
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const tempo = (Number($('tempo').value) || 100) / 100, t0 = ctx.currentTime + 0.15;
-  const m = result.machine, dest = ctx.destination;
-  scheduleVoice(ctx, result.high, dest, { hzPerIpm: m.hz.X, accelMmS2: m.acc.X, legato: result.legato, tempo, t0, vol: 0.05 });
-  scheduleVoice(ctx, result.low, dest, { hzPerIpm: m.hz.Z, accelMmS2: m.acc.Z, legato: result.legato, tempo, t0, vol: 0.06 });
-  if (result.trio && result.c?.length) {
-    scheduleVoice(ctx, result.c, dest, { hzPerIpm: m.hz.C, accelMmS2: m.acc.C, legato: result.legato, tempo, t0, vol: 0.04 });
+  const dest = ctx.destination;
+  const plan = result.plan ?? listenPlan(result, getProfile());
+  if (plan?.blocks?.some((b) => b.kind === 'move')) {
+    const p = getProfile();
+    schedulePlan(ctx, plan, dest, {
+      tempo, t0,
+      volOf: (L) => (L === p.a.axis ? 0.05 : L === p.b.axis ? 0.06 : L === 'C' ? 0.04 : 0.05),
+    });
+    player = { ctx };
+    $('listen').classList.add('on'); $('listen').textContent = '■ STOP';
+    const end = (plan.seconds ?? 0) / tempo;
+    const me = player; setTimeout(() => { if (player === me) stop(); }, (end + 0.5) * 1000);
+  } else {
+    const m = result.machine;
+    scheduleVoice(ctx, result.high, dest, { hzPerIpm: m.hz.X, accelMmS2: m.acc.X, legato: result.legato, tempo, t0, vol: 0.05 });
+    scheduleVoice(ctx, result.low, dest, { hzPerIpm: m.hz.Z, accelMmS2: m.acc.Z, legato: result.legato, tempo, t0, vol: 0.06 });
+    if (result.trio && result.c?.length) {
+      scheduleVoice(ctx, result.c, dest, { hzPerIpm: m.hz.C, accelMmS2: m.acc.C, legato: result.legato, tempo, t0, vol: 0.04 });
+    }
+    player = { ctx };
+    $('listen').classList.add('on'); $('listen').textContent = '■ STOP';
+    const end = Math.max(0, ...[...result.high, ...result.low, ...(result.c ?? [])].map((n) => (n.t + n.dur) / tempo));
+    const me = player; setTimeout(() => { if (player === me) stop(); }, (end + 0.5) * 1000);
   }
-  player = { ctx };
-  $('listen').classList.add('on'); $('listen').textContent = '■ STOP';
-  const end = Math.max(0, ...[...result.high, ...result.low, ...(result.c ?? [])].map((n) => (n.t + n.dur) / tempo));
-  const me = player; setTimeout(() => { if (player === me) stop(); }, (end + 0.5) * 1000);
 });
 
 // ---------- save ----------

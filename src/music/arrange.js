@@ -10,6 +10,7 @@ import { monoLine, fitVoice, mergeShort, expandSlides } from './voices.js';
 import { rangeOf, buildSong, buildTrio, zDrumNotes, LATHE_OUT, netTravel } from './build.js';
 import { tracePath, pathSummaryComments, isRotaryLetter } from './path.js';
 export { isRotaryLetter, tracePath, pathSummaryComments, downloadText } from './path.js';
+export { planProgram, junctionDeviationOf } from './planner.js';
 
 const VOCAL = /vo[xc]|vocal|voice|voix|sing|lead|melod|solo/i;
 
@@ -61,7 +62,7 @@ export function arrange(tracks, { lead, fill, bass, from = 0, to = 1e9, repeat =
 export const PRESETS = {
   'REVTURN lathe': {
     note: 'Rev\'s REVTURN lathe (grblHAL). Starts by moving to Z-1.375 X0 in work coordinates, ends at Z-0.25 X0.',
-    flavor: 'grbl', units: 'in', diameter: true, g7: true, numbers: true, tag: 'REVTURN music',
+    flavor: 'grbl', units: 'in', diameter: true, g7: true, numbers: true, tag: 'REVTURN music', junctionDeviation: 0.01,
     a: { axis: 'X', steps: 800, micro: 16, max: 1016, accel: 50, box: 0.65 },
     b: { axis: 'Z', steps: 1932, micro: 32, max: 558.8, accel: 12, box: 0.4 },
     // C (chuck): $103 steps/deg, $113 deg/min, $123 deg/s2. Used only when the third-voice option is on.
@@ -70,21 +71,21 @@ export const PRESETS = {
   },
   'grbl mill / router (X + Y)': {
     note: 'Typical GRBL machine with GT2 belts or 8 mm screws. Jog to a clear spot first: the song moves around it.',
-    flavor: 'grbl', units: 'mm', diameter: false, g7: false, numbers: true,
+    flavor: 'grbl', units: 'mm', diameter: false, g7: false, numbers: true, junctionDeviation: 0.01,
     a: { axis: 'X', steps: 80, micro: 16, max: 3000, accel: 200, box: 20 },
     b: { axis: 'Y', steps: 80, micro: 16, max: 3000, accel: 200, box: 20 },
     start: '', end: '',
   },
   '3D printer, Marlin (X + Y)': {
     note: 'Marlin: home first and lift Z, the song moves around where the head is. Dwell is in milliseconds.',
-    flavor: 'marlin', units: 'mm', diameter: false, g7: false, numbers: false,
+    flavor: 'marlin', units: 'mm', diameter: false, g7: false, numbers: false, junctionDeviation: 0.013,
     a: { axis: 'X', steps: 80, micro: 16, max: 6000, accel: 500, box: 25 },
     b: { axis: 'Y', steps: 80, micro: 16, max: 6000, accel: 500, box: 25 },
     start: '', end: '',
   },
   'LinuxCNC mill (X + Y)': {
     note: 'LinuxCNC: G4 P in seconds, M2 at the end.',
-    flavor: 'linuxcnc', units: 'mm', diameter: false, g7: false, numbers: true,
+    flavor: 'linuxcnc', units: 'mm', diameter: false, g7: false, numbers: true, junctionDeviation: 0.05,
     a: { axis: 'X', steps: 200, micro: 8, max: 2400, accel: 300, box: 20 },
     b: { axis: 'Y', steps: 200, micro: 8, max: 2400, accel: 300, box: 20 },
     start: '', end: '',

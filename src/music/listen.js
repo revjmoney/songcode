@@ -2,10 +2,14 @@
 // SONGCODE by JMSCNC, Copyright (C) 2026 Rev. J. Money / JMSCNC (jmscnc.com).
 // Licensed GPL-3.0-or-later; keep this attribution (GPLv3 section 7(b), see NOTICE.md).
 //
-// LISTEN preview: square waves whose pitch follows each motor's accel ramp, so a slow axis
-// (REVTURN Z at 12 mm/s²) takes time to reach the note, as it does on the iron.
+// LISTEN preview: square waves whose pitch follows the motion planner (grbl-style trapezoid,
+// junction deviation, lookahead, per-axis max/accel) so timing and pitch match the machine.
+// listenEnvelope / rampTime remain as a simple per-note ramp used by tests and as a fallback.
 
 // time in seconds for the motor to change from fromHz to toHz given Hz per ipm and accel in mm/s²
+import { planProgram, schedulePlan } from './planner.js';
+export { planProgram, schedulePlan };
+
 export function rampTime(fromHz, toHz, hzPerIpm, accelMmS2) {
   if (!(hzPerIpm > 0) || !(accelMmS2 > 0)) return 0;
   const accelIpmPerS = (accelMmS2 / 25.4) * 60;          // mm/s² -> in/s² -> ipm/s
@@ -66,4 +70,13 @@ export function scheduleVoice(ctx, notes, dest, {
 export function isPartialWindow(from, to, length, { eps = 0.05 } = {}) {
   if (!(length > 0)) return false;
   return from > eps || to < length - eps;
+}
+
+export function listenPlan(result, profile) {
+  if (!result?.lines) return null;
+  return planProgram(result.lines, result.out ?? {}, result.machine ?? {}, profile ?? {});
+}
+
+export function missedPlannerMoves(plan) {
+  return plan?.missed ?? 0;
 }
