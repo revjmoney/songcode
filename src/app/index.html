@@ -89,6 +89,20 @@
       <label><input type="checkbox" id="g7"> Lathe: G7 diameter mode</label>
       <label><input type="checkbox" id="numbers"> N line numbers</label>
     </div>
+    <div id="rotary-box" class="extras">
+      <label><input type="checkbox" id="rotary"> Rotary feed math (A/B/C is steps/deg, deg/min, deg/s²)</label>
+      <div id="rotary-opts" hidden>
+        <label>Convention
+          <select id="rotary-conv">
+            <option value="g93">G93 inverse time (recommended)</option>
+            <option value="deg">G94 deg/min (rotary-only moves)</option>
+            <option value="radius">G94 path feed with stock radius</option>
+          </select>
+        </label>
+        <label id="rotary-radius-wrap">Stock radius <input id="rotary-radius" type="number" min="0.01" step="any" value="25"> <span class="u">mm</span></label>
+        <p class="hint">Opt-in and off by default, so a two-axis X+Y program stays the usual linear output. Inverse time (F = 60 / seconds) is the safe mixed linear+rotary feed on grbl, Marlin and LinuxCNC. Deg/min is for a rotary-only move; mixed moves still switch to G93. Path-with-radius uses F = hypot(linear, ω·r).</p>
+      </div>
+    </div>
     <div class="grid two">
       <label>Start code (runs absolute, G90) <textarea id="start" rows="2" spellcheck="false" placeholder="optional, e.g. G0 X50 Y50"></textarea></label>
       <label>End code <textarea id="end" rows="2" spellcheck="false" placeholder="optional"></textarea></label>
@@ -101,6 +115,16 @@
     <div id="stats" class="stats"></div>
     <div id="warn" class="warn"></div>
     <canvas id="plot" width="900" height="220" aria-label="Notes over time for both motors"></canvas>
+    <div id="path-wrap">
+      <div class="row path-bar">
+        <strong>Travel envelope</strong>
+        <label><input type="radio" name="pathview" id="path-2d" value="2d" checked> 2D</label>
+        <label><input type="radio" name="pathview" id="path-3d" value="3d"> 3D</label>
+        <span id="path-over" class="path-over"></span>
+      </div>
+      <canvas id="pathplot" width="900" height="320" aria-label="Toolpath travel envelope versus the bounce box"></canvas>
+      <p class="hint" id="path-hint">The green line is the relative tool path around the start point (zero). The amber box is the travel you set for each axis. Overtravel is flagged before you start the cycle, and the same summary is written into the download as comments (not into the on-page program text used by tests).</p>
+    </div>
     <div class="row">
       <button type="button" id="listen">▶ LISTEN</button>
       <button type="button" id="download" class="go">⬇ DOWNLOAD .nc</button>

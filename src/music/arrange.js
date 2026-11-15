@@ -8,6 +8,8 @@
 // Then machine profiles for any stepper machine and the program framing (start / end code).
 import { monoLine, fitVoice, mergeShort, expandSlides } from './voices.js';
 import { rangeOf, buildSong, buildTrio, zDrumNotes, LATHE_OUT, netTravel } from './build.js';
+import { tracePath, pathSummaryComments, isRotaryLetter } from './path.js';
+export { isRotaryLetter, tracePath, pathSummaryComments, downloadText } from './path.js';
 
 const VOCAL = /vo[xc]|vocal|voice|voix|sing|lead|melod|solo/i;
 
@@ -90,13 +92,17 @@ export const PRESETS = {
 };
 
 // profile -> the machine object buildSong uses (internally inches: Hz per ipm, max ipm, accel mm/s2)
-export function machineOf(p) {
+// rotary: opt-in. A/B/C steps are steps/deg, max is deg/min, accel is deg/s². Hz is per deg/min.
+export function machineOf(p, { rotary = false } = {}) {
   const hzLin = (ax) => (25.4 / 60) * (ax.steps / ax.micro);
+  const hzRot = (ax) => (ax.steps / ax.micro) / 60;                    // Hz per deg/min
   // C is rotary: $103 is steps/deg, so Hz per rpm = (steps/deg * 360) / micro / 60
   const hzC = p.c ? (p.c.steps * 360) / p.c.micro / 60 : 1;
+  const rotA = rotary && isRotaryLetter(p.a.axis);
+  const rotB = rotary && isRotaryLetter(p.b.axis);
   return {
-    hz: { X: hzLin(p.a), Z: hzLin(p.b), C: hzC },
-    max: { X: p.a.max / 25.4, Z: p.b.max / 25.4, C: p.c ? p.c.max / 360 : 0 },
+    hz: { X: rotA ? hzRot(p.a) : hzLin(p.a), Z: rotB ? hzRot(p.b) : hzLin(p.b), C: hzC },
+    max: { X: rotA ? p.a.max : p.a.max / 25.4, Z: rotB ? p.b.max : p.b.max / 25.4, C: p.c ? p.c.max / 360 : 0 },
     acc: { X: p.a.accel, Z: p.b.accel, C: p.c?.accel ?? 0 },
     micro: { x: p.a.micro, z: p.b.micro, c: p.c?.micro ?? 8 },
   };
@@ -141,9 +147,13 @@ const inch = (p, v) => (p.units === 'mm' ? v / 25.4 : v);
 export function songcode(tracks, picks, profile, {
   title = 'song', tempo = 1, transpose = 0, mergeLow = 0.12, legato = true,
   slides = true, trio = false, drums = null, cLine = null,
+  rotary = false, rotaryConvention = 'g93', rotaryRadius = null,
 } = {}) {
+  const rotA = rotary && isRotaryLetter(profile.a.axis);
+  const rotB = rotary && isRotaryLetter(profile.b.axis);
+  const rotaryOn = rotA || rotB;
   const { high, low } = arrange(tracks, picks);
-  const m = machineOf(profile);
+  const m = machineOf(profile, { rotary: rotaryOn });
   const [al, ah] = rangeOf(m, 'X'), [bl, bh] = rangeOf(m, 'Z');
   const A = fitVoice(high, al, ah, transpose), B = fitVoice(low, bl, bh, transpose);
   let highNotes = slides ? expandSlides(A.notes) : A.notes;
@@ -153,7 +163,17 @@ export function songcode(tracks, picks, profile, {
   const usedDrums = !trio && drumHits.length > 0;
   if (usedDrums) lowNotes = zDrumNotes(drumHits, m).map((n) => ({ ...n, key: 69 + 12 * Math.log2(Math.max(n.hz, 1) / 440) }));
   const out = outOf(profile);
-  const box = { boxX: inch(profile, profile.a.box), boxZ: inch(profile, profile.b.box) };
+  if (rotaryOn) {
+    const conv = rotaryConvention || 'g93';
+    const radius = rotaryRadius ?? (profile.units === 'in' ? 1 : 25);
+    out.rotary = { enabled: true, convention: conv, radius };
+    out.rotaryAxes = [rotA, rotB];
+    if (conv === 'g93') out.header = out.header.replace(/\bG94\b/, 'G93');
+  }
+  const box = {
+    boxX: rotA ? profile.a.box : inch(profile, profile.a.box),
+    boxZ: rotB ? profile.b.box : inch(profile, profile.b.box),
+  };
   let song, lines, travel, C = { notes: [], shift: 0, folded: 0 };
   if (trio && cLine?.length && m.max.C > 0) {
     const [cl, ch] = rangeOf(m, 'C');
@@ -173,11 +193,14 @@ export function songcode(tracks, picks, profile, {
     lines = frame(song.lines, profile);
     travel = netTravel(song.lines, out);
   }
+  const path = tracePath(lines, out, { ...profile, rotary: rotaryOn ? out.rotary : null });
+  const pathSummary = pathSummaryComments(path);
   return {
     lines, text: lines.join('\n') + '\n', seconds: song.seconds, warnings: song.warnings, travel, out,
     high: highNotes, low: lowNotes, c: C.notes, shift: { a: A.shift, b: B.shift, c: C.shift },
     folded: { a: A.folded, b: B.folded, c: C.folded },
     slides: (slides ? highNotes.filter((n) => n.slide).length + lowNotes.filter((n) => n.slide).length : 0),
     trio: !!(trio && cLine?.length && m.max.C > 0), usedDrums, machine: m, legato,
+    rotary: rotaryOn, path, pathSummary,
   };
 }

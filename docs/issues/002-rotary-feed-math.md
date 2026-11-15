@@ -1,3 +1,9 @@
+# DONE in 0.3.0 (local `cos/next-steps`, 2026-11-14) — Rotary feed math
+
+This draft was implemented on the local branch. It was **not** filed on GitHub.
+
+---
+
 # Rotary axes (A/B/C) on a mill still use linear feed math
 
 **Type:** bug / caveat
@@ -22,3 +28,8 @@ The REVTURN **opt-in third voice** already uses the measured chuck numbers (step
 ## Workaround
 
 Leave A/B/C unselected unless you really have measured what your controller does with mixed linear+rotary `F` words, and you have entered steps so the resulting Hz is the pitch you want.
+
+
+## Resolution (0.3.0)
+
+Opt-in, off by default, so X+Y output stays byte-identical. When a voice is A/B/C, the table is relabelled steps/deg, deg/min, deg/s². Conventions: G93 inverse time (default when on), G94 deg/min for rotary-only moves, or G94 path feed with a stock radius. Covered by tests on grbl, Marlin and LinuxCNC presets.

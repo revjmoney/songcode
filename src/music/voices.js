@@ -37,9 +37,9 @@ export function monoLine(notes, pick = 'high') {
     const n = live.reduce((m, x) => (pick === 'high' ? (x.key > m.key ? x : m) : x.key < m.key ? x : m));
     const prev = out[out.length - 1];
     if (prev && prev.src === n && Math.abs(prev.t + prev.dur - a) < 1e-6) prev.dur += b2 - a;
-    else out.push({ t: a, dur: b2 - a, key: n.key, src: n, slide: !!n.slide });
+    else out.push({ t: a, dur: b2 - a, key: n.key, src: n, slide: !!n.slide, slideTo: n.slideTo });
   }
-  return out.map(({ t, dur, key, slide }) => ({ t, dur, key, ...(slide ? { slide: true } : {}) }));
+  return out.map(({ t, dur, key, slide, slideTo }) => ({ t, dur, key, ...(slide ? { slide: true } : {}), ...(slideTo != null ? { slideTo } : {}) }));
 }
 
 // shift a voice by whole octaves so most notes fit [loHz, hiHz]; notes still outside fold in by octaves and are
@@ -59,7 +59,9 @@ export function fitVoice(line, loHz, hiHz, transpose = 0) {
     while (f < loHz && f * 2 <= hiHz) { key += 12; f *= 2; fold = true; }
     const out = f > hiHz * 1.0001 || f < loHz * 0.9999;
     if (fold) folded++;
-    return { t: n.t, dur: n.dur, key, hz: f, folded: fold, outside: out, ...(n.slide ? { slide: true } : {}) };
+    const delta = key - (n.key + shift);
+    return { t: n.t, dur: n.dur, key, hz: f, folded: fold, outside: out, ...(n.slide ? { slide: true } : {}),
+      ...(n.slideTo != null ? { slideTo: n.slideTo + shift + delta } : {}) };
   });
   return { notes, shift, folded };
 }
@@ -72,6 +74,7 @@ export function mergeShort(notes, minDur) {
     if (prev && n.dur < minDur && Math.abs(prev.t + prev.dur - n.t) < 0.02) {
       prev.dur = n.t + n.dur - prev.t;
       if (n.slide) prev.slide = true;
+      if (n.slideTo != null) prev.slideTo = n.slideTo;
     } else out.push({ ...n });
   }
   return out;
@@ -109,11 +112,12 @@ export function expandSlides(notes, { minStep = 0.04 } = {}) {
   for (let i = 0; i < notes.length; i++) {
     const n = notes[i], next = notes[i + 1];
     const connected = next && (next.t - (n.t + n.dur) < 0.05);
-    if (!n.slide || !connected) { out.push({ ...n }); continue; }
+    const dest = (connected && next) ? next.key : (n.slideTo != null ? n.slideTo : null);
+    if (!n.slide || dest == null || dest === n.key) { out.push({ ...n }); continue; }
     const steps = Math.max(3, Math.min(16, Math.round(n.dur / minStep)));
     for (let s = 0; s < steps; s++) {
       const frac = s / (steps - 1);
-      const key = n.key + (next.key - n.key) * frac;
+      const key = n.key + (dest - n.key) * frac;
       const hz = hzOf(key);
       out.push({
         t: n.t + (n.dur * s) / steps,

@@ -9,7 +9,8 @@ import { loadSong } from '../music/load.js';
 import { bookTracks, bookLength, bookDroneLine } from '../music/book.js';
 import { BOOK } from '../../songs/book.js';
 import { noteName } from '../music/voices.js';
-import { autoPick, monoOf, PRESETS, songcode } from '../music/arrange.js';
+import { autoPick, monoOf, PRESETS, songcode, isRotaryLetter, downloadText } from '../music/arrange.js';
+import { drawPath2D, drawPath3D } from '../music/path.js';
 import { scheduleVoice, isPartialWindow, listenEnvelope, missedPitches } from '../music/listen.js';
 import { startRain } from './rain.js';
 
@@ -40,15 +41,48 @@ function getProfile() {
     a: ax('a'), b: ax('b'), c: base.c, start: $('start').value, end: $('end').value, tag: base.tag,
   };
 }
-const unitLabel = () => { for (const el of document.querySelectorAll('.u')) el.textContent = $('units').value === 'in' ? 'in' : 'mm'; };
-function saveProfile() { try { localStorage.setItem(STORE, JSON.stringify({ preset: presetSel.value, p: getProfile() })); } catch { /* private mode */ } }
+function unitLabel() {
+  const u = $('units').value === 'in' ? 'in' : 'mm';
+  for (const el of document.querySelectorAll('.u')) el.textContent = u;
+  const rot = !!$('rotary')?.checked;
+  const aRot = rot && isRotaryLetter(document.querySelector('.axes tr[data-v=a] [data-k=axis]')?.value);
+  const bRot = rot && isRotaryLetter(document.querySelector('.axes tr[data-v=b] [data-k=axis]')?.value);
+  const th = document.querySelectorAll('.axes thead th');
+  if (th.length >= 7) {
+    const both = aRot && bRot, mix = (aRot || bRot) && !both;
+    th[2].textContent = both ? 'Steps/deg' : mix ? 'Steps/mm or deg' : 'Steps/mm';
+    th[4].textContent = both ? 'Max deg/min' : mix ? 'Max mm or deg/min' : 'Max mm/min';
+    th[5].textContent = both ? 'Accel deg/s²' : mix ? 'Accel mm or deg/s²' : 'Accel mm/s²';
+    th[6].innerHTML = both ? 'Travel ± deg' : mix ? 'Travel ± mm or deg' : `Travel ± <span class="u">${u}</span>`;
+  }
+  if ($('rotary-opts')) $('rotary-opts').hidden = !rot;
+  if ($('rotary-radius-wrap')) $('rotary-radius-wrap').hidden = !rot || $('rotary-conv').value !== 'radius';
+}
+function saveProfile() {
+  try {
+    localStorage.setItem(STORE, JSON.stringify({
+      preset: presetSel.value, p: getProfile(),
+      rotary: $('rotary').checked, rotaryConv: $('rotary-conv').value, rotaryRadius: $('rotary-radius').value,
+    }));
+  } catch { /* private mode */ }
+}
 function loadProfile() {
-  try { const s = JSON.parse(localStorage.getItem(STORE)); if (s?.p?.a) { presetSel.value = s.preset; setProfile({ ...s.p, note: PRESETS[s.preset]?.note, c: PRESETS[s.preset]?.c }); return; } } catch { /* none */ }
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE));
+    if (s?.p?.a) {
+      presetSel.value = s.preset; setProfile({ ...s.p, note: PRESETS[s.preset]?.note, c: PRESETS[s.preset]?.c });
+      if (s.rotary) $('rotary').checked = true;
+      if (s.rotaryConv) $('rotary-conv').value = s.rotaryConv;
+      if (s.rotaryRadius) $('rotary-radius').value = s.rotaryRadius;
+      unitLabel();
+      return;
+    }
+  } catch { /* none */ }
   presetSel.value = 'grbl mill / router (X + Y)'; setProfile(PRESETS[presetSel.value]);
 }
 presetSel.addEventListener('change', () => { if (PRESETS[presetSel.value]) setProfile(PRESETS[presetSel.value]); update(); });
 $('machine').addEventListener('input', (e) => {
-  const extra = e.target && ['trio', 'drums', 'cpart'].includes(e.target.id);
+  const extra = e.target && ['trio', 'drums', 'cpart', 'rotary', 'rotary-conv', 'rotary-radius', 'path-2d', 'path-3d'].includes(e.target.id);
   if (e.target !== presetSel && !extra) { if (presetSel.value !== 'Custom') presetSel.value = 'Custom'; $('presetnote').textContent = ''; }
   unitLabel(); showExtras(); update();
 });
@@ -198,9 +232,11 @@ function rebuild() {
   if (p.a.axis === p.b.axis) { $('warn').textContent = 'The melody and bass motors need different axes.'; return; }
   const trio = $('trio').checked && isRevturn();
   const drumsOn = $('drums').checked && isRevturn();
+  const rotary = $('rotary').checked;
   result = songcode(song.tracks, picks, p, {
     title, tempo: n('tempo', 100) / 100, transpose: Math.round(n('transpose', 0)),
     trio, cLine: cLineOf(from, to), drums: drumsOn ? (song.drums ?? []) : null,
+    rotary, rotaryConvention: $('rotary-conv').value, rotaryRadius: n('rotary-radius', p.units === 'in' ? 1 : 25),
   });
   const u = p.units === 'in' ? 'in' : 'mm', dec = u === 'in' ? 3 : 1;
   const kb = new Blob([result.text]).size / 1024;
@@ -219,6 +255,8 @@ function rebuild() {
   if (result.trio) w.push('Third voice is on C (chuck). Spindle stays off. Start and end moves are still in inches.');
   if (result.usedDrums) w.push('Drums are playing on Z: kicks and snares under the melody. The bass line is left out.');
   if (trio && !result.trio) w.push('Pick a part for C, or a book drone, to write the third voice.');
+  if (result.rotary) w.push(`Rotary feed math is on (${$('rotary-conv').value}): A/B/C uses steps/deg and inverse-time or deg/min feed, not linear hypot.`);
+  if (result.path?.overtravel?.length) w.push(...result.path.overtravel.map((x) => `Overtravel: ${x}`));
   const m = result.machine;
   if (m) {
     const envX = listenEnvelope(result.high, { hzPerIpm: m.hz.X, accelMmS2: m.acc.X, legato: result.legato });
@@ -230,6 +268,7 @@ function rebuild() {
   const shown = result.lines.length > 400 ? [...result.lines.slice(0, 400), `... ${result.lines.length - 400} more lines in the download`] : result.lines;
   $('code').textContent = shown.join('\n');
   plot();
+  plotPath();
 }
 
 function plot() {
@@ -246,6 +285,30 @@ function plot() {
   draw(result.low, '#ffb347'); draw(result.high, '#7fffb0');
   if (result.c?.length) draw(result.c, '#6cc4ff');
 }
+
+let pathCam = { yaw: 0.7, pitch: 0.45 };
+function plotPath() {
+  if (!result?.path) return;
+  const c = $('pathplot'), g = c.getContext('2d');
+  if ($('path-3d').checked) drawPath3D(g, result.path, { yaw: pathCam.yaw, pitch: pathCam.pitch });
+  else drawPath2D(g, result.path);
+  const ot = result.path.overtravel ?? [];
+  $('path-over').textContent = ot.length ? `Overtravel: ${ot.join('; ')}` : '';
+}
+$('path-2d').addEventListener('change', plotPath);
+$('path-3d').addEventListener('change', plotPath);
+(() => {
+  const c = $('pathplot');
+  let drag = null;
+  c.addEventListener('pointerdown', (e) => { if ($('path-3d').checked) { drag = { x: e.clientX, y: e.clientY, yaw: pathCam.yaw, pitch: pathCam.pitch }; c.setPointerCapture(e.pointerId); } });
+  c.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    pathCam.yaw = drag.yaw + (e.clientX - drag.x) / 80;
+    pathCam.pitch = Math.max(-1.2, Math.min(1.2, drag.pitch + (e.clientY - drag.y) / 80));
+    plotPath();
+  });
+  c.addEventListener('pointerup', () => { drag = null; });
+})();
 
 // ---------- listen: square waves with each motor's accel ramp ----------
 function stop() {
@@ -274,7 +337,7 @@ const fileName = () => `${(song?.title || 'song').toLowerCase().replace(/[^a-z0-
 $('download').addEventListener('click', () => {
   if (!result) return;
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([result.text], { type: 'text/plain' }));
+  a.href = URL.createObjectURL(new Blob([downloadText(result)], { type: 'text/plain' }));
   a.download = fileName(); document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
