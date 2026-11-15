@@ -124,7 +124,8 @@ export function buildSong(x, z, m, { boxX = 0.6, boxZ = 0.5, tempo = 1, dolphin 
   const marks = [...new Set([0, ...sx.flatMap((n) => [n.t, n.t + n.dur]), ...sz.flatMap((n) => [n.t, n.t + n.dur])].map((v) => Math.round(v * 1e4) / 1e4))].sort((a, b) => a - b);
   const at = (list, a, b) => list.find((n) => n.t <= a + 1e-4 && n.t + n.dur >= b - 1e-4);
   const L = [`(${W.o.tag}: ${title.replace(/[()]/g, '')})`, W.o.header];
-  if (drone) L.push(`M3 S${r3(drone)}`, 'G4 P0.8');
+  // `drone` used to emit M3 (spindle on). That is never safe for song playback; the option is ignored.
+  void drone;
   let px = 0, pz = 0, dx = 1, dz = 1, n = 9000, seconds = 0, moves = 0;
   if (dolphin) {
     const D = [[24, 28, 33, 38, 39.5, 36], [28, 34, 39.5, 39.5, 32, 26], [24, 30, 36, 39.5], [39.5, 33, 27, 33, 39.5], [26, 31, 36, 39.5, 39.5, 30]];
@@ -175,7 +176,6 @@ export function buildSong(x, z, m, { boxX = 0.6, boxZ = 0.5, tempo = 1, dolphin 
     if (nz && nz.hz / m.hz.Z > m.max.Z) warnings.push(`${W.o.axes[1]} note ${Math.round(nz.hz)} Hz is above the ${W.o.axes[1]} max rate`);
   }
   if (Math.abs(px) > 1e-6 || Math.abs(pz) > 1e-6) L.push(`G1 ${[Math.abs(px) > 1e-6 ? W.a(-px) : '', Math.abs(pz) > 1e-6 ? W.b(-pz) : ''].filter(Boolean).join(' ')} ${W.f(10, 0)}`);
-  if (drone) L.push('M5');
   L.push('G90');
   if (W.o.end) L.push(W.o.end);
   return { lines: L, warnings: [...new Set(warnings)], seconds, moves };
@@ -233,7 +233,7 @@ export function buildTrio(x, z, c, m, { boxX = 0.6, boxZ = 0.4, tempo = 1, title
   if (back) L.push(`G1 ${back} F250`);
   const rem = ((pc % 360) + 360) % 360;
   if (rem > 1e-3) L.push(`G1 C${f3(rem > 180 ? 360 - rem : -rem)} F18000`);
-  L.push('G90 G20', 'M30');
+  L.push('G20', 'G90', 'M30');
   return { lines: L, warnings: [...new Set(warnings)], seconds, moves, chuckTurns: pc / 360 };
 }
 

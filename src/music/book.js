@@ -13,7 +13,7 @@ export function tokens(song, voice) {
   return (song[voice] ?? '').split(/\s+/).filter((s) => s && s !== '|').map((tok) => {
     const m = /^(r|[A-G]#?-?\d):(\d+(?:\.\d+)?)(~?)$/.exec(tok);
     if (!m) throw new Error(`${song.id} ${voice}: cannot read "${tok}"`);
-    return { key: m[1] === 'r' ? null : keyOf(m[1]), len: Number(m[2]) };
+    return { key: m[1] === 'r' ? null : keyOf(m[1]), len: Number(m[2]), slide: m[3] === '~' };
   });
 }
 
@@ -34,8 +34,8 @@ export function timeMap(song) {
 export function voiceNotes(song, voice) {
   const at = timeMap(song), out = [];
   let u = 0;
-  for (const { key, len } of tokens(song, voice)) {
-    if (key != null) out.push({ t: at(u), dur: at(u + len) - at(u), key });
+  for (const { key, len, slide } of tokens(song, voice)) {
+    if (key != null) out.push({ t: at(u), dur: at(u + len) - at(u), key, ...(slide ? { slide: true } : {}) });
     u += len;
   }
   return out;
@@ -43,6 +43,18 @@ export function voiceNotes(song, voice) {
 
 // { Melody: notes, Bass: notes } for the converter
 export const bookTracks = (song) => ({ Melody: voiceNotes(song, 'x'), Bass: voiceNotes(song, 'z') });
+
+export function bookLength(song) {
+  const notes = Object.values(bookTracks(song)).flat();
+  return notes.length ? Math.max(...notes.map((n) => n.t + n.dur)) : 0;
+}
+
+// a held chuck note from the book drone (pitch name like D5), used when the REVTURN C-voice option is on
+export function bookDroneLine(song, length) {
+  if (!song?.drone) return [];
+  return [{ t: 0, dur: length, key: keyOf(song.drone), drone: true }];
+}
+
 
 // MIDI: one beat = one second (60 bpm), so the tempo map is baked into the note times
 export function bookMidi(song) {

@@ -99,3 +99,108 @@ describe('arranging', () => {
     expect(s.kind).toBe('MIDI');
   });
 });
+
+import { tokens, voiceNotes } from '../src/music/book.js';
+import { expandSlides, hzOf } from '../src/music/voices.js';
+import { buildSong } from '../src/music/build.js';
+import { machineOf } from '../src/music/arrange.js';
+import { writeMidi } from '../src/music/midi.js';
+import { listenEnvelope, rampTime, isPartialWindow } from '../src/music/listen.js';
+
+describe('slides', () => {
+  const king = BOOK.find((s) => s.id === 'mountain-king');
+  it('keeps the ~ flag on book notes', () => {
+    const tok = tokens(king, 'x');
+    expect(tok.filter((t) => t.slide).length).toBeGreaterThan(0);
+    expect(voiceNotes(king, 'x').some((n) => n.slide)).toBe(true);
+  });
+  it('expands a slide into a pitch ramp toward the next note', () => {
+    const a = { t: 0, dur: 1, key: 60, hz: hzOf(60), slide: true };
+    const b = { t: 1, dur: 1, key: 72, hz: hzOf(72) };
+    const got = expandSlides([a, b]);
+    const ramp = got.filter((n) => n.slide);
+    expect(ramp.length).toBeGreaterThanOrEqual(3);
+    expect(ramp[0].hz).toBeCloseTo(hzOf(60), 5);
+    expect(ramp.at(-1).hz).toBeCloseTo(hzOf(72), 5);
+    expect(ramp[1].hz).toBeGreaterThan(ramp[0].hz);
+    expect(got.at(-1).key).toBe(72);
+  });
+  it('with slides off, a sliding song still matches the old two-axis g-code', () => {
+    const r = songcode(bookTracks(king), picks, PRESETS['REVTURN lathe'], { title: `${king.title}, ${king.composer}`, slides: false });
+    expect(r.text).toBe(file('test/fixtures/mountain-king-revturn-noslide.nc').toString());
+    expect(r.slides).toBe(0);
+  });
+  it('with slides on (the default), the last Mountain King slide is a changing feed, not a held pitch', () => {
+    const r = songcode(bookTracks(king), picks, PRESETS['REVTURN lathe'], { title: `${king.title}, ${king.composer}` });
+    expect(r.slides).toBeGreaterThan(0);
+    expect(r.text).not.toBe(file('test/fixtures/mountain-king-revturn-noslide.nc').toString());
+    const ramp = r.high.filter((n) => n.slide);
+    expect(ramp.length).toBeGreaterThanOrEqual(3);
+    expect(ramp[0].hz).not.toBeCloseTo(ramp.at(-1).hz, 0);
+  });
+});
+
+describe('safety and opt-in voices', () => {
+  const twinkle = BOOK.find((s) => s.id === 'twinkle');
+  const tracks = bookTracks(twinkle);
+  it('buildSong never turns the spindle on, even if a drone value is passed', () => {
+    const m = machineOf(PRESETS['REVTURN lathe']);
+    const song = buildSong([{ t: 0, dur: 0.5, hz: 200 }], [], m, { title: 'drone test', drone: 80 });
+    expect(song.lines.join('\n')).not.toMatch(/\bM3\b/);
+    expect(song.lines.join('\n')).not.toMatch(/\bM4\b/);
+  });
+  it('a song with no slides still writes the same two-axis REVTURN program', () => {
+    const r = songcode(tracks, picks, PRESETS['REVTURN lathe'], { title: `${twinkle.title}, ${twinkle.composer}` });
+    expect(r.text).toBe(file('test/fixtures/twinkle-revturn.nc').toString());
+    expect(r.trio).toBe(false);
+    expect(r.usedDrums).toBe(false);
+  });
+  it('the C-axis third voice is off by default and opt-in writes C words with the spindle off', () => {
+    const cLine = [{ t: 0, dur: 2, key: 74 }]; // D5
+    const off = songcode(tracks, picks, PRESETS['REVTURN lathe'], { title: 'twinkle' });
+    expect(off.text).not.toMatch(/\bC-?[\d.]/);
+    const on = songcode(tracks, picks, PRESETS['REVTURN lathe'], { title: 'twinkle trio', trio: true, cLine });
+    expect(on.trio).toBe(true);
+    expect(on.text).toMatch(/\bC-?[\d.]/);
+    expect(on.lines[1]).toBe('M5');
+    expect(on.text).not.toMatch(/\bM3\b/);
+    expect(on.lines.some((l) => l === 'G20')).toBe(true);
+  });
+  it('drums on Z are off by default and opt-in replace the bass with kick/snare strokes', () => {
+    const drums = [{ t: 0, piece: 'K' }, { t: 0.8, piece: 'S' }, { t: 1.6, piece: 'K' }];
+    const off = songcode(tracks, picks, PRESETS['REVTURN lathe'], { title: 'twinkle' });
+    const on = songcode(tracks, picks, PRESETS['REVTURN lathe'], { title: 'twinkle drums', drums });
+    expect(on.usedDrums).toBe(true);
+    expect(on.low.some((n) => n.drum === 'K' || n.drum === 'S')).toBe(true);
+    expect(on.text).not.toBe(off.text);
+  });
+  it('loadSong keeps GM drum notes in drums, not in pitched tracks', () => {
+    const bytes = writeMidi([
+      { name: 'Melody', ch: 0, notes: [{ t: 0, dur: 1, key: 60, vel: 100 }] },
+      { name: 'Drums', ch: 9, notes: [{ t: 0, dur: 0.1, key: 36, vel: 100 }, { t: 1, dur: 0.1, key: 38, vel: 100 }] },
+    ]);
+    const s = loadSong(alphaTab, bytes, 'kit.mid');
+    expect(Object.keys(s.tracks)).toEqual(['Melody']);
+    expect(s.drums.map((d) => d.piece)).toEqual(['K', 'S']);
+  });
+});
+
+describe('LISTEN ramps and the section window', () => {
+  it('a short note on slow Z accel does not reach pitch; a long note does', () => {
+    const hzPerIpm = (25.4 / 60) * (1932 / 32);          // REVTURN Z
+    const accel = 12;                                    // mm/s²
+    const hz = 400;                                       // a high Z note (~15 ipm): ramp is ~0.55 s
+    const tRamp = rampTime(0, hz, hzPerIpm, accel);
+    expect(tRamp).toBeGreaterThan(0.4);
+    const short = listenEnvelope([{ t: 0, dur: 0.1, hz }], { hzPerIpm, accelMmS2: accel });
+    expect(short[0].reaches).toBe(false);
+    const long = listenEnvelope([{ t: 0, dur: 2, hz }], { hzPerIpm, accelMmS2: accel });
+    expect(long[0].reaches).toBe(true);
+  });
+  it('isPartialWindow is true only when From/To leaves some of the song out', () => {
+    expect(isPartialWindow(0, 60, 180)).toBe(true);
+    expect(isPartialWindow(0, 181, 180)).toBe(false);
+    expect(isPartialWindow(8, 68, 50)).toBe(true);
+    expect(isPartialWindow(0, 50, 50)).toBe(false);
+  });
+});
