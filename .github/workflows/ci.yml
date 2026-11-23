@@ -1,0 +1,43 @@
+# CI: private data guard, tests, build. Runs on pushes to main, pull requests and by hand.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Private data guard
+        run: |
+          pat='192\.168\.1\.[0-9]{1,3}|myemail937|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN [A-Z ]*PRIVATE KEY|rose[ _-]?engine|guilloche|gen-rose'
+          if git grep -n -I -i -E "$pat" -- . ':(exclude).github/workflows/ci.yml'; then
+            echo "::error::Private data found (lines above). Remove it before merging."
+            exit 1
+          fi
+          echo "Guard clean."
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: songcode-dist
+          path: dist
+          if-no-files-found: error
