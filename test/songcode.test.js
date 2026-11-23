@@ -12,7 +12,7 @@ import { PRESETS, songcode, arrange, autoPick, frame, downloadText, machineOf as
 const file = (p) => readFileSync(new URL(`../${p}`, import.meta.url));
 const picks = { lead: 'Melody', bass: 'Bass', fill: null };
 const moves = (lines) => lines.filter((l) => /^(N\d+ )?G1 /.test(l));
-const word = (l, a) => { const m = new RegExp(`${a}(-?[\d.]+)`).exec(l); return m ? Number(m[1]) : 0; };
+const word = (l, a) => { const m = new RegExp(`${a}(-?[\\d.]+)`).exec(l); return m ? Number(m[1]) : 0; };
 
 describe('song book files', () => {
   it('every shipped tab reads back with the book notes', () => {
@@ -48,7 +48,8 @@ describe('general g-code', () => {
         const f = word(l, 'F'), dx = Math.abs(word(l, 'X')), dy = Math.abs(word(l, 'Y')), d = Math.hypot(dx, dy);
         if (d > 0) { expect((f * dx) / d).toBeLessThanOrEqual(p.a.max * 1.001); expect((f * dy) / d).toBeLessThanOrEqual(p.b.max * 1.001); }
       }
-      expect(Math.abs(x)).toBeLessThan(0.002); expect(Math.abs(y)).toBeLessThan(0.002);
+      // each relative move is written to 0.001 mm, so a whole song can end a few microns off: allow 0.01 mm
+      expect(Math.abs(x)).toBeLessThan(0.01); expect(Math.abs(y)).toBeLessThan(0.01);
       expect(r.text).not.toMatch(/\bZ-?\d/);
     });
   }
